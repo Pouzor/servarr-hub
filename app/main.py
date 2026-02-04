@@ -1,17 +1,45 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.db import check_db_connection, init_db
-from app.api.routes import services, dashboard, jellyseerr
+from app.api.routes import services, dashboard, jellyseerr, sync
+from app.schedulers.scheduler import app_scheduler
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gestion du cycle de vie de l'application"""
+    # Startup
+    print(f"🚀 Démarrage de {settings.APP_NAME} v{settings.APP_VERSION}")
+    
+    # Vérifier la connexion DB
+    if check_db_connection():
+        print("✅ Connexion à la base de données OK")
+        init_db()
+        print("✅ Tables initialisées")
+    else:
+        print("❌ Échec de connexion à la base de données")
+    
+    # Démarrer le scheduler (sync toutes les 15 minutes)
+    app_scheduler.start(interval_minutes=15)
+    
+    yield
+    
+    # Shutdown
+    print("🛑 Arrêt de l'application...")
+    app_scheduler.stop()
+
 
 # Créer l'application FastAPI
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
-    debug=settings.DEBUG
+    debug=settings.DEBUG,
+    lifespan=lifespan
 )
 
-# Configuration CORS (pour accès depuis un frontend)
+# Configuration CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # À restreindre en production
@@ -24,21 +52,7 @@ app.add_middleware(
 app.include_router(services.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(jellyseerr.router, prefix="/api")
-
-
-@app.on_event("startup")
-async def startup_event():
-    """Événements au démarrage de l'app"""
-    print(f"🚀 Démarrage de {settings.APP_NAME} v{settings.APP_VERSION}")
-    
-    # Vérifier la connexion DB
-    if check_db_connection():
-        print("✅ Connexion à la base de données OK")
-        # Créer les tables si elles n'existent pas
-        init_db()
-        print("✅ Tables initialisées")
-    else:
-        print("❌ Échec de connexion à la base de données")
+app.include_router(sync.router, prefix="/api")
 
 
 @app.get("/")
@@ -48,7 +62,8 @@ async def root():
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
         "status": "running",
-        "docs": "/docs"
+        "docs": "/docs",
+        "scheduler": "active" if app_scheduler.is_running else "inactive"
     }
 
 
@@ -58,5 +73,6 @@ async def health_check():
     db_status = check_db_connection()
     return {
         "status": "healthy" if db_status else "unhealthy",
-        "database": "connected" if db_status else "disconnected"
+        "database": "connected" if db_status else "disconnected",
+        "scheduler": "running" if app_scheduler.is_running else "stopped"
     }

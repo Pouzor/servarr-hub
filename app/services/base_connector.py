@@ -6,7 +6,15 @@ from datetime import datetime
 class BaseConnector:
     """Classe de base pour tous les connecteurs API"""
     
-    def __init__(self, base_url: str, api_key: str, timeout: int = 30):
+    def __init__(self, base_url: str, api_key: str, port: Optional[int] = None, timeout: int = 30):
+        # Si un port est fourni et pas déjà dans l'URL, l'ajouter
+        if port and f":{port}" not in base_url:
+            # Supprimer le / final si présent
+            base_url = base_url.rstrip('/')
+            # Vérifier si l'URL a déjà un port
+            if not any(f":{p}" in base_url for p in range(1, 65536)):
+                base_url = f"{base_url}:{port}"
+        
         self.base_url = base_url.rstrip('/')
         self.api_key = api_key
         self.timeout = timeout

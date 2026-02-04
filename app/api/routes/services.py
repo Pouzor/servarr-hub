@@ -142,7 +142,12 @@ async def test_service_connection(
             detail=f"Type de service non supporté: {service_name}"
         )
     
-    connector = ConnectorClass(base_url=service.url, api_key=service.api_key)
+    # Passer le port au connecteur si disponible
+    connector = ConnectorClass(
+        base_url=service.url, 
+        api_key=service.api_key,
+        port=service.port  # ⬅️ AJOUT DU PORT ICI
+    )
     
     try:
         success, message = await connector.test_connection()
