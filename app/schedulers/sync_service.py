@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any
 import time
 
@@ -44,12 +44,12 @@ class SyncService:
             sync_meta = SyncMetadata(service_name=service_type)
             self.db.add(sync_meta)
         
-        sync_meta.last_sync_time = datetime.now()
+        sync_meta.last_sync_time = datetime.now(timezone.utc)
         sync_meta.sync_status = status
         sync_meta.records_synced = records
         sync_meta.sync_duration_ms = duration_ms
         sync_meta.error_message = error
-        sync_meta.next_sync_time = datetime.now() + timedelta(minutes=15)
+        sync_meta.next_sync_time = datetime.now(timezone.utc) + timedelta(minutes=15)
         
         self.db.commit()
     
@@ -92,13 +92,22 @@ class SyncService:
                     else:
                         time_ago = "Unknown"
                     
+                    # Récupérer l'image
+                    image_url = ""
+                    for img in movie.get("images", []):
+                        if img.get("coverType") == "poster":
+                            image_url = img.get("remoteUrl", "")
+                            break
+                    if not image_url and movie.get("images"):
+                        image_url = movie.get("images", [{}])[0].get("remoteUrl", "")
+                    
                     item = LibraryItem(
                         title=movie.get("title", "Unknown"),
                         year=movie.get("year", 0),
                         media_type=MediaType.MOVIE,
-                        image_url=movie.get("images", [{}])[0].get("remoteUrl", ""),
+                        image_url=image_url,
                         image_alt=f"{movie.get('title')} poster",
-                        quality=movie.get("qualityProfile", {}).get("name", "Unknown"),
+                        quality=movie.get("qualityProfileId", "Unknown"),
                         rating=str(movie.get("ratings", {}).get("imdb", {}).get("value", "")),
                         description=movie.get("overview", ""),
                         added_date=time_ago,
@@ -113,21 +122,37 @@ class SyncService:
             # Ajouter au calendrier
             calendar_count = 0
             for event in calendar[:20]:
+                release_date_str = event.get("physicalRelease") or event.get("digitalRelease")
+                if not release_date_str:
+                    continue
+                
+                try:
+                    release_date = datetime.fromisoformat(
+                        release_date_str.replace("Z", "+00:00")
+                    ).date()
+                except:
+                    continue
+                
                 existing = self.db.query(CalendarEvent).filter(
                     CalendarEvent.title == event.get("title"),
-                    CalendarEvent.release_date == event.get("physicalRelease")
+                    CalendarEvent.release_date == release_date
                 ).first()
                 
-                if not existing and event.get("physicalRelease"):
-                    release_date = datetime.fromisoformat(
-                        event.get("physicalRelease").replace("Z", "+00:00")
-                    ).date()
+                if not existing:
+                    # Récupérer l'image
+                    image_url = ""
+                    for img in event.get("images", []):
+                        if img.get("coverType") == "poster":
+                            image_url = img.get("remoteUrl", "")
+                            break
+                    if not image_url and event.get("images"):
+                        image_url = event.get("images", [{}])[0].get("remoteUrl", "")
                     
                     cal_event = CalendarEvent(
                         title=event.get("title", "Unknown"),
                         media_type=MediaType.MOVIE,
                         release_date=release_date,
-                        image_url=event.get("images", [{}])[0].get("remoteUrl", ""),
+                        image_url=image_url,
                         image_alt=f"{event.get('title')} poster",
                         status=CalendarStatus.MONITORED
                     )
@@ -200,13 +225,22 @@ class SyncService:
                     else:
                         time_ago = "Unknown"
                     
+                    # Récupérer l'image
+                    image_url = ""
+                    for img in series.get("images", []):
+                        if img.get("coverType") == "poster":
+                            image_url = img.get("remoteUrl", "")
+                            break
+                    if not image_url and series.get("images"):
+                        image_url = series.get("images", [{}])[0].get("remoteUrl", "")
+                    
                     item = LibraryItem(
                         title=series.get("title", "Unknown"),
                         year=series.get("year", 0),
                         media_type=MediaType.TV,
-                        image_url=series.get("images", [{}])[0].get("remoteUrl", ""),
+                        image_url=image_url,
                         image_alt=f"{series.get('title')} poster",
-                        quality=series.get("qualityProfile", {}).get("name", "Unknown"),
+                        quality=str(series.get("qualityProfileId", "Unknown")),
                         rating=str(series.get("ratings", {}).get("value", "")),
                         description=series.get("overview", ""),
                         added_date=time_ago,
@@ -223,9 +257,12 @@ class SyncService:
                 if not event.get("airDate"):
                     continue
                 
-                air_date = datetime.fromisoformat(
-                    event.get("airDate") + "T00:00:00+00:00"
-                ).date()
+                try:
+                    air_date = datetime.fromisoformat(
+                        event.get("airDate") + "T00:00:00+00:00"
+                    ).date()
+                except:
+                    continue
                 
                 # Titre avec info épisode
                 series_title = event.get("series", {}).get("title", "Unknown")
@@ -235,16 +272,26 @@ class SyncService:
                 existing = self.db.query(CalendarEvent).filter(
                     CalendarEvent.title == series_title,
                     CalendarEvent.release_date == air_date,
-                    CalendarEvent.episode == f"S{season:02d}E{episode_num:02d}"
+                    CalendarEvent.episode == f"Season {season}, Episode {episode_num}"
                 ).first()
                 
                 if not existing:
+                    # Récupérer l'image
+                    image_url = ""
+                    series_data = event.get("series", {})
+                    for img in series_data.get("images", []):
+                        if img.get("coverType") == "poster":
+                            image_url = img.get("remoteUrl", "")
+                            break
+                    if not image_url and series_data.get("images"):
+                        image_url = series_data.get("images", [{}])[0].get("remoteUrl", "")
+                    
                     cal_event = CalendarEvent(
                         title=series_title,
                         media_type=MediaType.TV,
                         release_date=air_date,
                         episode=f"Season {season}, Episode {episode_num}",
-                        image_url=event.get("series", {}).get("images", [{}])[0].get("remoteUrl", ""),
+                        image_url=image_url,
                         image_alt=f"{series_title} poster",
                         status=CalendarStatus.MONITORED
                     )
@@ -313,7 +360,7 @@ class SyncService:
             user_stat.details = {
                 "active_users": len([u for u in users if not u.get("Policy", {}).get("IsDisabled", False)])
             }
-            user_stat.last_synced = datetime.now()
+            user_stat.last_synced = datetime.now(timezone.utc)
             
             # Movies
             movie_stat = self.db.query(DashboardStatistic).filter(
@@ -325,7 +372,7 @@ class SyncService:
                 self.db.add(movie_stat)
             
             movie_stat.total_count = library_stats.get("movies", 0)
-            movie_stat.last_synced = datetime.now()
+            movie_stat.last_synced = datetime.now(timezone.utc)
             
             # TV Shows
             tv_stat = self.db.query(DashboardStatistic).filter(
@@ -340,7 +387,7 @@ class SyncService:
             tv_stat.details = {
                 "total_episodes": library_stats.get("episodes", 0)
             }
-            tv_stat.last_synced = datetime.now()
+            tv_stat.last_synced = datetime.now(timezone.utc)
             
             self.db.commit()
             
@@ -386,8 +433,24 @@ class SyncService:
         connector = JellyseerrConnector(base_url=service.url, api_key=service.api_key, port=service.port)
         
         try:
+            # Tester d'abord la connexion
+            success, message = await connector.test_connection()
+            if not success:
+                raise Exception(f"Test de connexion échoué: {message}")
+            
             # Récupérer les requêtes pendantes
             requests = await connector.get_requests(limit=50, status="pending")
+            
+            if not requests:
+                print("ℹ️  Aucune requête Jellyseerr en attente")
+                duration_ms = int((time.time() - start_time) * 1000)
+                self.update_sync_metadata(
+                    ServiceType.JELLYSEERR,
+                    SyncStatus.SUCCESS,
+                    0,
+                    duration_ms
+                )
+                return {"success": True, "requests_added": 0}
             
             # Nettoyer les anciennes requêtes
             self.db.query(JellyseerrRequest).delete()
@@ -395,25 +458,44 @@ class SyncService:
             # Ajouter les nouvelles
             added_count = 0
             for req in requests[:20]:
-                media = req.get("media", {})
-                requested_by = req.get("requestedBy", {})
-                
-                request_item = JellyseerrRequest(
-                    title=media.get("title", "Unknown"),
-                    media_type=MediaType.MOVIE if req.get("type") == "movie" else MediaType.TV,
-                    year=media.get("releaseDate", "")[:4] if media.get("releaseDate") else 0,
-                    image_url=f"https://image.tmdb.org/t/p/w500{media.get('posterPath', '')}",
-                    image_alt=f"{media.get('title')} poster",
-                    priority=RequestPriority.MEDIUM,
-                    requested_by=requested_by.get("displayName", "Unknown"),
-                    requested_date=self._format_time_ago(
-                        datetime.fromisoformat(req.get("createdAt").replace("Z", "+00:00"))
-                    ),
-                    quality="4K" if req.get("is4k") else "1080p",
-                    description=media.get("overview", "")
-                )
-                self.db.add(request_item)
-                added_count += 1
+                try:
+                    media = req.get("media", {})
+                    requested_by = req.get("requestedBy", {})
+                    
+                    # Extraction sécurisée de l'année
+                    year = 0
+                    if media.get("releaseDate"):
+                        try:
+                            year = int(media.get("releaseDate", "")[:4])
+                        except:
+                            year = 0
+                    
+                    # Extraction sécurisée de la date de création
+                    requested_date = "Unknown"
+                    if req.get("createdAt"):
+                        try:
+                            created_dt = datetime.fromisoformat(req.get("createdAt").replace("Z", "+00:00"))
+                            requested_date = self._format_time_ago(created_dt)
+                        except:
+                            pass
+                    
+                    request_item = JellyseerrRequest(
+                        title=media.get("title", "Unknown"),
+                        media_type=MediaType.MOVIE if req.get("type") == "movie" else MediaType.TV,
+                        year=year,
+                        image_url=f"https://image.tmdb.org/t/p/w500{media.get('posterPath', '')}" if media.get('posterPath') else "",
+                        image_alt=f"{media.get('title', 'Unknown')} poster",
+                        priority=RequestPriority.MEDIUM,
+                        requested_by=requested_by.get("displayName", "Unknown"),
+                        requested_date=requested_date,
+                        quality="4K" if req.get("is4k") else "1080p",
+                        description=media.get("overview", "")
+                    )
+                    self.db.add(request_item)
+                    added_count += 1
+                except Exception as item_error:
+                    print(f"⚠️  Erreur traitement requête Jellyseerr: {item_error}")
+                    continue
             
             self.db.commit()
             
@@ -466,7 +548,11 @@ class SyncService:
     
     def _format_time_ago(self, dt: datetime) -> str:
         """Formater une date en 'X hours ago', 'X days ago'"""
-        now = datetime.now(dt.tzinfo)
+        # S'assurer que dt est timezone-aware
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        
+        now = datetime.now(timezone.utc)
         delta = now - dt
         
         if delta.days > 0:

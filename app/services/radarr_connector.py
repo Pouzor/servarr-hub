@@ -1,5 +1,5 @@
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.services.base_connector import BaseConnector
 
 
@@ -47,7 +47,7 @@ class RadarrConnector(BaseConnector):
             Liste des films à venir
         """
         try:
-            start_date = datetime.now().date()
+            start_date = datetime.now(timezone.utc).date()
             end_date = start_date + timedelta(days=days_ahead)
             
             params = {
@@ -74,13 +74,22 @@ class RadarrConnector(BaseConnector):
         try:
             movies = await self.get_movies()
             
-            # Filtrer par date d'ajout
-            cutoff_date = datetime.now() - timedelta(days=days)
-            recent = [
-                movie for movie in movies
-                if movie.get("added") and 
-                datetime.fromisoformat(movie["added"].replace("Z", "+00:00")) > cutoff_date
-            ]
+            # Filtrer par date d'ajout - FIX: utiliser timezone-aware datetime
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            recent = []
+            
+            for movie in movies:
+                if not movie.get("added"):
+                    continue
+                
+                try:
+                    # Convertir la date en timezone-aware
+                    added_dt = datetime.fromisoformat(movie["added"].replace("Z", "+00:00"))
+                    if added_dt > cutoff_date:
+                        recent.append(movie)
+                except (ValueError, AttributeError) as e:
+                    # Ignorer les films avec des dates invalides
+                    continue
             
             # Trier par date d'ajout (plus récent en premier)
             recent.sort(key=lambda x: x.get("added", ""), reverse=True)

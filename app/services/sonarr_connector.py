@@ -1,5 +1,5 @@
 from typing import List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.services.base_connector import BaseConnector
 
 
@@ -47,7 +47,7 @@ class SonarrConnector(BaseConnector):
             Liste des épisodes à venir
         """
         try:
-            start_date = datetime.now().date()
+            start_date = datetime.now(timezone.utc).date()
             end_date = start_date + timedelta(days=days_ahead)
             
             params = {
@@ -74,14 +74,24 @@ class SonarrConnector(BaseConnector):
         try:
             series = await self.get_series()
             
-            # Filtrer par date d'ajout
-            cutoff_date = datetime.now() - timedelta(days=days)
-            recent = [
-                s for s in series
-                if s.get("added") and 
-                datetime.fromisoformat(s["added"].replace("Z", "+00:00")) > cutoff_date
-            ]
+            # Filtrer par date d'ajout - FIX: utiliser timezone-aware datetime
+            cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+            recent = []
             
+            for serie in series:
+                if not serie.get("added"):
+                    continue
+                
+                try:
+                    # Convertir la date en timezone-aware
+                    added_dt = datetime.fromisoformat(serie["added"].replace("Z", "+00:00"))
+                    if added_dt > cutoff_date:
+                        recent.append(serie)
+                except (ValueError, AttributeError) as e:
+                    # Ignorer les films avec des dates invalides
+                    continue
+
+
             # Trier par date d'ajout
             recent.sort(key=lambda x: x.get("added", ""), reverse=True)
             
