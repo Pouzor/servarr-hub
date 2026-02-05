@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from contextlib import asynccontextmanager
 from app.core.config import settings
+from app.core.security import verify_api_key
 from app.db import check_db_connection, init_db
 from app.api.routes import services, dashboard, jellyseerr, sync
 from app.schedulers.scheduler import app_scheduler
@@ -49,10 +51,10 @@ app.add_middleware(
 )
 
 # Inclure les routers
-app.include_router(services.router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api")
-app.include_router(jellyseerr.router, prefix="/api")
-app.include_router(sync.router, prefix="/api")
+app.include_router(services.router, prefix="/api", dependencies=[Depends(verify_api_key)])
+app.include_router(dashboard.router, prefix="/api", dependencies=[Depends(verify_api_key)])
+app.include_router(jellyseerr.router, prefix="/api", dependencies=[Depends(verify_api_key)])
+app.include_router(sync.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 
 
 @app.get("/")

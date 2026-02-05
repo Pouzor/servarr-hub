@@ -642,6 +642,7 @@ class SyncService:
         results["sonarr"] = await self.sync_sonarr()
         results["jellyfin"] = await self.sync_jellyfin()
         results["jellyseerr"] = await self.sync_jellyseerr()
+        results["monitored_items"] = await self.sync_monitored_items()
         
         print("\n" + "="*50)
         print("✅ SYNCHRONISATION TERMINÉE")

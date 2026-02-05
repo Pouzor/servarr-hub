@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str
+    API_KEY: str
     
     # App Info
     APP_NAME: str = "Servarr Hub"
