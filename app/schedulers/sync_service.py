@@ -52,15 +52,14 @@ class SyncService:
         sync_meta.next_sync_time = datetime.now(timezone.utc) + timedelta(minutes=15)
         
         self.db.commit()
-
-
+    
     async def sync_monitored_items(self) -> Dict[str, Any]:
         """
         Synchroniser les statistiques des items monitorés (Radarr + Sonarr)
         """
         print("📊 Synchronisation des items monitorés...")
         start_time = time.time()
-    
+        
         try:
             # Initialiser les totaux
             total_monitored = 0
@@ -70,30 +69,31 @@ class SyncService:
             missing = 0
             queued = 0
             unreleased = 0
-        
+            
             # === RADARR ===
             radarr_service = self.get_active_service(ServiceType.RADARR)
             if radarr_service:
                 radarr_connector = RadarrConnector(
-                    base_url=radarr_service.url, 
-                    api_key=radarr_service.api_key, 
+                    base_url=radarr_service.url,
+                    api_key=radarr_service.api_key,
                     port=radarr_service.port
                 )
+                
                 try:
                     radarr_stats = await radarr_connector.get_statistics()
-                
+                    
                     # Ajouter les stats Radarr
                     total_monitored += radarr_stats.get("monitored_movies", 0)
                     total_unmonitored += radarr_stats.get("total_movies", 0) - radarr_stats.get("monitored_movies", 0)
                     downloaded += radarr_stats.get("downloaded_movies", 0)
                     missing += radarr_stats.get("missing_movies", 0)
-                
+                    
                     print(f"  📽️  Radarr: {radarr_stats.get('monitored_movies', 0)} monitorés")
                 except Exception as e:
                     print(f"  ⚠️  Erreur stats Radarr: {e}")
                 finally:
                     await radarr_connector.close()
-        
+            
             # === SONARR ===
             sonarr_service = self.get_active_service(ServiceType.SONARR)
             if sonarr_service:
@@ -102,31 +102,32 @@ class SyncService:
                     api_key=sonarr_service.api_key,
                     port=sonarr_service.port
                 )
+                
                 try:
                     sonarr_stats = await sonarr_connector.get_statistics()
-                
+                    
                     # Ajouter les stats Sonarr
                     total_monitored += sonarr_stats.get("monitored_series", 0)
                     total_unmonitored += sonarr_stats.get("total_series", 0) - sonarr_stats.get("monitored_series", 0)
                     downloaded += sonarr_stats.get("downloaded_episodes", 0)
                     missing += sonarr_stats.get("missing_episodes", 0)
-                
+                    
                     print(f"  📺 Sonarr: {sonarr_stats.get('monitored_series', 0)} monitorés")
                 except Exception as e:
                     print(f"  ⚠️  Erreur stats Sonarr: {e}")
                 finally:
                     await sonarr_connector.close()
-        
+            
             # Mettre à jour ou créer la statistique MONITORED_ITEMS
             monitored_stat = self.db.query(DashboardStatistic).filter(
                 DashboardStatistic.stat_type == StatType.MONITORED_ITEMS
             ).first()
-        
+            
             if not monitored_stat:
                 monitored_stat = DashboardStatistic(stat_type=StatType.MONITORED_ITEMS)
                 self.db.add(monitored_stat)
-        
-        # Total = items monitorés
+            
+            # Total = items monitorés
             monitored_stat.total_count = total_monitored
             monitored_stat.details = {
                 "monitored": total_monitored,
@@ -138,11 +139,11 @@ class SyncService:
                 "unreleased": unreleased
             }
             monitored_stat.last_synced = datetime.now(timezone.utc)
-        
+            
             self.db.commit()
-        
+            
             duration_ms = int((time.time() - start_time) * 1000)
-        
+            
             print(f"✅ Monitored Items: {total_monitored} monitorés, {missing} manquants")
             return {
                 "success": True,
@@ -150,11 +151,10 @@ class SyncService:
                 "unmonitored": total_unmonitored,
                 "details": monitored_stat.details
             }
-        
+            
         except Exception as e:
             print(f"❌ Erreur sync monitored items: {e}")
             return {"success": False, "error": str(e)}
-
     
     async def sync_radarr(self) -> Dict[str, Any]:
         """Synchroniser les données Radarr"""
@@ -448,10 +448,13 @@ class SyncService:
             # Récupérer les stats
             users = await connector.get_users()
             library_stats = await connector.get_library_items()
-
+            
             # Récupérer le temps de visionnage total des 30 derniers jours
             watch_time_data = await connector.get_total_watch_time(days=30)
             total_watch_hours = watch_time_data.get("total_hours", 0)
+            
+            # Récupérer les détails TV Shows (avec durée totale)
+            tv_details = await connector.get_tv_shows_details()
             
             # Mettre à jour les statistiques
             # Users
@@ -491,9 +494,11 @@ class SyncService:
                 tv_stat = DashboardStatistic(stat_type=StatType.TV_SHOWS)
                 self.db.add(tv_stat)
             
-            tv_stat.total_count = library_stats.get("series", 0)
+            tv_stat.total_count = tv_details.get("total_series", 0)
             tv_stat.details = {
-                "total_episodes": library_stats.get("episodes", 0)
+                "total_series": tv_details.get("total_series", 0),
+                "total_episodes": tv_details.get("total_episodes", 0),
+                "total_hours": tv_details.get("total_hours", 0)
             }
             tv_stat.last_synced = datetime.now(timezone.utc)
             
@@ -507,11 +512,13 @@ class SyncService:
                 duration_ms
             )
             
-            print(f"✅ Jellyfin: {len(users)} users, {library_stats.get('movies', 0)} films, {total_watch_hours}h visionnées")
+            print(f"✅ Jellyfin: {len(users)} users, {library_stats.get('movies', 0)} films, {tv_details.get('total_series', 0)} séries ({tv_details.get('total_hours', 0)}h), {total_watch_hours}h visionnées")
             return {
                 "success": True,
                 "users": len(users),
-                "library_stats": library_stats
+                "library_stats": library_stats,
+                "tv_details": tv_details,
+                "watch_hours": total_watch_hours
             }
             
         except Exception as e:
