@@ -448,6 +448,10 @@ class SyncService:
             # Récupérer les stats
             users = await connector.get_users()
             library_stats = await connector.get_library_items()
+
+            # Récupérer le temps de visionnage total des 30 derniers jours
+            watch_time_data = await connector.get_total_watch_time(days=30)
+            total_watch_hours = watch_time_data.get("total_hours", 0)
             
             # Mettre à jour les statistiques
             # Users
@@ -461,7 +465,8 @@ class SyncService:
             
             user_stat.total_count = len(users)
             user_stat.details = {
-                "active_users": len([u for u in users if not u.get("Policy", {}).get("IsDisabled", False)])
+                "active_users": len([u for u in users if not u.get("Policy", {}).get("IsDisabled", False)]),
+                "total_watch_hours": total_watch_hours
             }
             user_stat.last_synced = datetime.now(timezone.utc)
             
@@ -502,7 +507,7 @@ class SyncService:
                 duration_ms
             )
             
-            print(f"✅ Jellyfin: {len(users)} users, {library_stats.get('movies', 0)} films")
+            print(f"✅ Jellyfin: {len(users)} users, {library_stats.get('movies', 0)} films, {total_watch_hours}h visionnées")
             return {
                 "success": True,
                 "users": len(users),
