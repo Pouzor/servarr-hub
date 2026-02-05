@@ -171,3 +171,49 @@ class JellyfinConnector(BaseConnector):
                 "total_seconds": 0,
                 "period_days": days
             }
+    
+    async def get_tv_shows_details(self) -> Dict[str, Any]:
+        """
+        Récupérer les détails complets des séries TV (nombre de séries, épisodes, durée totale)
+        
+        Returns:
+            Dictionnaire avec:
+            - total_series: Nombre total de séries
+            - total_episodes: Nombre total d'épisodes
+            - total_hours: Durée totale en heures de tous les épisodes
+        """
+        try:
+            # Récupérer tous les épisodes avec leur durée (RunTimeTicks)
+            params = {
+                "Recursive": True,
+                "IncludeItemTypes": "Episode",
+                "Fields": "RunTimeTicks",
+                "EnableTotalRecordCount": True
+            }
+            
+            response = await self._get("/Items", params=params)
+            
+            episodes = response.get("Items", [])
+            total_episodes = response.get("TotalRecordCount", len(episodes))
+            
+            # Calculer la durée totale
+            # RunTimeTicks est en ticks (1 tick = 100 nanosecondes)
+            # 1 seconde = 10,000,000 ticks
+            total_ticks = sum(ep.get("RunTimeTicks", 0) for ep in episodes)
+            total_seconds = total_ticks / 10_000_000
+            total_hours = round(total_seconds / 3600)
+            
+            # Récupérer le nombre de séries
+            series_params = {
+                "Recursive": True,
+                "IncludeItemTypes": "Series",
+                "EnableTotalRecordCount": True
+            }
+            
+            series_response = await self._get("/Items", params=series_params)
+            total_series = series_response.get("TotalRecordCount", 0)
+            
+            return {
+                "total_series": total_series,
+                "total_episodes": total_episodes,
+                "total_hours": total_hou
