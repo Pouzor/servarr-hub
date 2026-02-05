@@ -453,6 +453,9 @@ class SyncService:
             watch_time_data = await connector.get_total_watch_time(days=30)
             total_watch_hours = watch_time_data.get("total_hours", 0)
             
+            # Récupérer les détails Movies (avec durée totale)
+            movies_details = await connector.get_movies_details()
+            
             # Récupérer les détails TV Shows (avec durée totale)
             tv_details = await connector.get_tv_shows_details()
             
@@ -482,7 +485,10 @@ class SyncService:
                 movie_stat = DashboardStatistic(stat_type=StatType.MOVIES)
                 self.db.add(movie_stat)
             
-            movie_stat.total_count = library_stats.get("movies", 0)
+            movie_stat.total_count = movies_details.get("total_movies", 0)
+            movie_stat.details = {
+                "total_hours": movies_details.get("total_hours", 0)
+            }
             movie_stat.last_synced = datetime.now(timezone.utc)
             
             # TV Shows
@@ -512,11 +518,12 @@ class SyncService:
                 duration_ms
             )
             
-            print(f"✅ Jellyfin: {len(users)} users, {library_stats.get('movies', 0)} films, {tv_details.get('total_series', 0)} séries ({tv_details.get('total_hours', 0)}h), {total_watch_hours}h visionnées")
+            print(f"✅ Jellyfin: {len(users)} users, {movies_details.get('total_movies', 0)} films ({movies_details.get('total_hours', 0)}h), {tv_details.get('total_series', 0)} séries ({tv_details.get('total_hours', 0)}h), {total_watch_hours}h visionnées")
             return {
                 "success": True,
                 "users": len(users),
                 "library_stats": library_stats,
+                "movies_details": movies_details,
                 "tv_details": tv_details,
                 "watch_hours": total_watch_hours
             }
