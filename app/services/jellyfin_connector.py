@@ -172,6 +172,48 @@ class JellyfinConnector(BaseConnector):
                 "period_days": days
             }
     
+    async def get_movies_details(self) -> Dict[str, Any]:
+        """
+        Récupérer les détails complets des films (nombre de films, durée totale)
+        
+        Returns:
+            Dictionnaire avec:
+            - total_movies: Nombre total de films
+            - total_hours: Durée totale en heures de tous les films
+        """
+        try:
+            # Récupérer tous les films avec leur durée (RunTimeTicks)
+            params = {
+                "Recursive": True,
+                "IncludeItemTypes": "Movie",
+                "Fields": "RunTimeTicks",
+                "EnableTotalRecordCount": True
+            }
+            
+            response = await self._get("/Items", params=params)
+            
+            movies = response.get("Items", [])
+            total_movies = response.get("TotalRecordCount", len(movies))
+            
+            # Calculer la durée totale
+            # RunTimeTicks est en ticks (1 tick = 100 nanosecondes)
+            # 1 seconde = 10,000,000 ticks
+            total_ticks = sum(movie.get("RunTimeTicks", 0) for movie in movies)
+            total_seconds = total_ticks / 10_000_000
+            total_hours = round(total_seconds / 3600)
+            
+            return {
+                "total_movies": total_movies,
+                "total_hours": total_hours
+            }
+            
+        except Exception as e:
+            print(f"❌ Erreur récupération détails films: {e}")
+            return {
+                "total_movies": 0,
+                "total_hours": 0
+            }
+    
     async def get_tv_shows_details(self) -> Dict[str, Any]:
         """
         Récupérer les détails complets des séries TV (nombre de séries, épisodes, durée totale)
