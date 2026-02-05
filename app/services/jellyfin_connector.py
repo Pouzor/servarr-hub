@@ -216,4 +216,13 @@ class JellyfinConnector(BaseConnector):
             return {
                 "total_series": total_series,
                 "total_episodes": total_episodes,
-                "total_hours": total_hou
+                "total_hours": total_hours
+            }
+            
+        except Exception as e:
+            print(f"❌ Erreur récupération détails TV shows: {e}")
+            return {
+                "total_series": 0,
+                "total_episodes": 0,
+                "total_hours": 0
+            }
