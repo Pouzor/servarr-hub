@@ -2,7 +2,6 @@ from typing import List, Dict, Any
 from datetime import datetime, timedelta
 from app.services.base_connector import BaseConnector
 
-
 class JellyfinConnector(BaseConnector):
     """Connecteur pour l'API Jellyfin"""
     
@@ -64,7 +63,7 @@ class JellyfinConnector(BaseConnector):
         
         Args:
             limit: Nombre maximum d'items à retourner
-            
+        
         Returns:
             Liste des items récents
         """
@@ -89,7 +88,7 @@ class JellyfinConnector(BaseConnector):
         
         Args:
             days: Période en jours
-            
+        
         Returns:
             Statistiques de playback
         """
@@ -106,3 +105,69 @@ class JellyfinConnector(BaseConnector):
         except Exception as e:
             print(f"❌ Erreur récupération stats playback: {e}")
             return {}
+    
+    async def get_total_watch_time(self, days: int = 30) -> Dict[str, Any]:
+        """
+        Récupérer le temps de visionnage total via le plugin Playback Reporting
+        
+        Args:
+            days: Nombre de jours à analyser (défaut: 30)
+        
+        Returns:
+            Dictionnaire avec:
+            - total_hours: Temps total en heures (float)
+            - total_seconds: Temps total en secondes (int)
+            - period_days: Période analysée
+        """
+        try:
+            # Requête SQL personnalisée pour le temps total sur la période
+            # Le plugin Playback Reporting expose l'endpoint /user_usage_stats/submit_custom_query
+            url = "/user_usage_stats/submit_custom_query"
+            
+            # Calculer la date de début (il y a X jours)
+            start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            
+            query = f"""
+                SELECT SUM(PlayDuration) as TotalSeconds
+                FROM PlaybackActivity
+                WHERE DateCreated >= '{start_date}'
+            """
+            
+            body = {
+                "CustomQueryString": query,
+                "ReplaceUserId": False
+            }
+            
+            response = await self._post(url, json=body)
+            
+            # Format de réponse: {"columns": ["TotalSeconds"], "results": [[123456]]}
+            if response and response.get("results") and len(response["results"]) > 0:
+                total_seconds = response["results"][0][0]
+                if total_seconds is None:
+                    total_seconds = 0
+                else:
+                    total_seconds = int(total_seconds)
+                
+                total_hours = round(total_seconds / 3600, 1)
+                
+                return {
+                    "total_hours": total_hours,
+                    "total_seconds": total_seconds,
+                    "period_days": days
+                }
+            else:
+                print("⚠️  Aucune donnée de visionnage trouvée (plugin Playback Reporting installé ?)")
+                return {
+                    "total_hours": 0,
+                    "total_seconds": 0,
+                    "period_days": days
+                }
+                
+        except Exception as e:
+            print(f"❌ Erreur récupération watch time (Playback Reporting): {e}")
+            # Retourner des valeurs par défaut si le plugin n'est pas disponible
+            return {
+                "total_hours": 0,
+                "total_seconds": 0,
+                "period_days": days
+            }
