@@ -49,27 +49,32 @@ class BaseConnector:
             print(f"❌ Erreur HTTP {endpoint}: {e}")
             raise
     
-    async def _post(self, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def _post(self, endpoint: str, data: Optional[Dict[str, Any]] = None, json: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Effectuer une requête POST
-        
+    
         Args:
             endpoint: Chemin de l'endpoint
-            data: Données à envoyer
-            
+            data: Données à envoyer (alias pour json)
+            json: Données JSON à envoyer
+    
         Returns:
             Réponse JSON
         """
         url = f"{self.base_url}{endpoint}"
         headers = self._get_headers()
-        
+    
+        # Utiliser json si fourni, sinon data
+        payload = json if json is not None else data
+    
         try:
-            response = await self.client.post(url, headers=headers, json=data)
+            response = await self.client.post(url, headers=headers, json=payload)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPError as e:
             print(f"❌ Erreur HTTP POST {endpoint}: {e}")
             raise
+
     
     async def _put(self, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Effectuer une requête PUT"""
