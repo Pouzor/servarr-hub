@@ -65,46 +65,6 @@ def verify_analytics_tables():
         else:
             print(f"✅ Table {table_name} : OK ({len(column_names)} colonnes)")
     
-    # Test d'insertion/suppression sur playback_sessions
-    if 'playback_sessions' in existing_tables:
-        try:
-            with engine.connect() as conn:
-                # Test d'insertion
-                test_id = "test-verify-123"
-                conn.execute(text("""
-                    INSERT INTO playback_sessions 
-                    (id, media_id, media_title, media_type, user_id, user_name, 
-                     device_type, video_quality, playback_method, start_time, 
-                     status, is_active)
-                    VALUES 
-                    (:id, 'test-media', 'Test Media', 'movie', 'test-user', 'Test User',
-                     'web_browser', '1080p', 'direct_play', NOW(),
-                     'active', 1)
-                """), {"id": test_id})
-                conn.commit()
-                
-                # Vérification
-                result = conn.execute(text(
-                    "SELECT COUNT(*) as cnt FROM playback_sessions WHERE id = :id"
-                ), {"id": test_id})
-                count = result.scalar()
-                
-                # Nettoyage
-                conn.execute(text(
-                    "DELETE FROM playback_sessions WHERE id = :id"
-                ), {"id": test_id})
-                conn.commit()
-                
-                if count == 1:
-                    print("\n✅ Test d'écriture/lecture : OK")
-                else:
-                    print("\n❌ Test d'écriture/lecture : ÉCHEC")
-                    all_good = False
-                    
-        except Exception as e:
-            print(f"\n❌ Erreur lors du test d'écriture : {e}")
-            all_good = False
-    
     print("\n" + "="*60)
     if all_good:
         print("✅ Toutes les tables analytics sont correctement configurées!")

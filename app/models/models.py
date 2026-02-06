@@ -1,18 +1,21 @@
-from sqlalchemy import Column, String, Integer, Boolean, Text, DateTime, Date, JSON, Enum as SQLEnum, Index, Float, ForeignKey
+from sqlalchemy import Column, String, Integer, Boolean, Text, DateTime, Date, JSON, Enum as SQLEnum, Index, Float
 from sqlalchemy.sql import func
 from app.db import Base
 from app.models.enums import (
     ServiceType, StatType, SyncStatus,
     MediaType, RequestPriority, CalendarStatus,
-    DeviceType, PlaybackMethod, VideoQuality, SessionStatus  # Nouveaux imports
+    DeviceType, PlaybackMethod, VideoQuality, SessionStatus
 )
-import uuid
 
+import uuid
 
 def generate_uuid():
     """Génère un UUID au format string"""
     return str(uuid.uuid4())
 
+# ============================================
+# MODÈLES EXISTANTS
+# ============================================
 
 # Table 1: Service Configurations
 class ServiceConfiguration(Base):
@@ -30,7 +33,6 @@ class ServiceConfiguration(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
 # Table 2: Dashboard Statistics
 class DashboardStatistic(Base):
     __tablename__ = "dashboard_statistics"
@@ -42,7 +44,6 @@ class DashboardStatistic(Base):
     last_synced = Column(DateTime(timezone=True), index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
 
 # Table 3: Sync Metadata
 class SyncMetadata(Base):
@@ -58,7 +59,6 @@ class SyncMetadata(Base):
     records_synced = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
 
 # Table 4: Library Items
 class LibraryItem(Base):
@@ -78,7 +78,6 @@ class LibraryItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
 # Table 5: Calendar Events
 class CalendarEvent(Base):
     __tablename__ = "calendar_events"
@@ -93,7 +92,6 @@ class CalendarEvent(Base):
     status = Column(SQLEnum(CalendarStatus), nullable=False, default=CalendarStatus.MONITORED, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
 
 # Table 6: Jellyseerr Requests
 class JellyseerrRequest(Base):
@@ -112,6 +110,7 @@ class JellyseerrRequest(Base):
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 
 # Table 7: Playback Sessions
 class PlaybackSession(Base):
