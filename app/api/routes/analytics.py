@@ -27,71 +27,135 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 
-# ============================================
-# WEBHOOK ENDPOINT (PUBLIC)
-# ============================================
-
 @router.post("/webhook/playback", status_code=status.HTTP_200_OK)
 async def receive_playback_webhook(
     request: Request,
     db: Session = Depends(get_db)
 ):
     """
-    Endpoint pour recevoir les webhooks de lecture depuis Jellyfin/Plex
+    Endpoint pour recevoir les webhooks de lecture depuis Jellyfin
     
     Événements supportés :
-    - playback.start : Début de lecture
-    - playback.stop : Fin de lecture
-    - playback.pause : Mise en pause
-    - playback.unpause : Reprise de lecture
+    - PlaybackStart (Play)
+    - PlaybackStop (Stop)
+    - PlaybackPause (Pause)
+    - PlaybackUnpause (Resume)
     """
     try:
         # Récupérer le payload
         payload = await request.json()
         
-        event_type = payload.get("event")
-        data = payload.get("data", {})
+        logger.info(f"📥 Webhook reçu : {payload}")
+        
+        # Le plugin "Webhooks unofficial" envoie le format suivant :
+        # {
+        #   "NotificationType": "PlaybackStart",
+        #   "ServerId": "...",
+        #   "ServerName": "...",
+        #   "UserId": "...",
+        #   "UserName": "...",
+        #   "ItemId": "...",
+        #   "ItemName": "...",
+        #   "ItemType": "Movie" ou "Episode",
+        #   "Year": 2021,
+        #   "PlaybackPosition": "00:00:00",
+        #   "PlaybackPositionTicks": 0,
+        #   "RunTimeTicks": 88800000000,
+        #   "DeviceName": "...",
+        #   "ClientName": "...",
+        #   "PlayMethod": "DirectPlay" ou "Transcode",
+        #   ...
+        # }
+        
+        notification_type = payload.get("NotificationType")
+        
+        # Mapping des événements Jellyfin vers nos événements
+        event_mapping = {
+            "PlaybackStart": "playback.start",
+            "PlaybackStop": "playback.stop",
+            "PlaybackPause": "playback.pause",
+            "PlaybackUnpause": "playback.unpause",
+        }
+        
+        event_type = event_mapping.get(notification_type)
+        
+        if not event_type:
+            logger.warning(f"⚠️  Type de notification non supporté : {notification_type}")
+            return {"status": "ignored", "notification_type": notification_type}
         
         logger.info(f"📥 Webhook reçu : {event_type}")
         
-        # Extraction des données communes
-        media_id = data.get("media_id") or data.get("item_id")
-        user_id = data.get("user_id")
+        # Extraction des données
+        media_id = payload.get("ItemId")
+        user_id = payload.get("UserId")
         
         if not media_id or not user_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="media_id et user_id sont requis"
+                detail="ItemId et UserId sont requis"
             )
         
         # Traitement selon le type d'événement
         if event_type == "playback.start":
+            # Déterminer si c'est une série ou un film
+            item_type = payload.get("ItemType", "Movie")
+            media_type = "tv" if item_type == "Episode" else "movie"
+            
+            # Info épisode si c'est une série
+            episode_info = None
+            if item_type == "Episode":
+                season = payload.get("SeasonNumber", 0)
+                episode = payload.get("EpisodeNumber", 0)
+                episode_info = f"S{season:02d}E{episode:02d}"
+            
+            # Extraire la qualité vidéo
+            video_height = payload.get("VideoHeight", 0)
+            quality_map = {
+                2160: "4k",
+                1080: "1080p",
+                720: "720p",
+                480: "480p"
+            }
+            video_quality = quality_map.get(video_height, "unknown")
+            
+            # Déterminer si c'est du transcodage
+            play_method = payload.get("PlayMethod", "DirectPlay")
+            is_transcoding = play_method == "Transcode"
+            is_direct_playing = play_method == "DirectPlay"
+            
+            # Durée en secondes (RunTimeTicks / 10000000)
+            run_time_ticks = payload.get("RunTimeTicks", 0)
+            duration_seconds = run_time_ticks // 10000000 if run_time_ticks else None
+            
             session_data = {
                 "media_id": media_id,
-                "media_title": data.get("media_title") or data.get("title"),
-                "media_type": data.get("media_type", "movie"),
-                "media_year": data.get("year"),
-                "episode_info": data.get("episode_info"),
-                "poster_url": data.get("poster_url") or data.get("image_url"),
+                "media_title": payload.get("ItemName", "Unknown"),
+                "media_type": media_type,
+                "media_year": payload.get("Year"),
+                "episode_info": episode_info,
+                "poster_url": None,  # Pas disponible dans le format default
                 "user_id": user_id,
-                "user_name": data.get("user_name") or data.get("username"),
-                "device_name": data.get("device_name"),
-                "client_name": data.get("client_name") or data.get("player_name"),
-                "video_quality": data.get("video_quality") or data.get("quality"),
-                "is_transcoding": data.get("is_transcoding", False),
-                "is_direct_playing": data.get("is_direct_playing", True),
-                "transcoding_progress": data.get("transcoding_progress", 0),
-                "transcoding_speed": data.get("transcoding_speed"),
-                "video_codec_source": data.get("video_codec_source"),
-                "video_codec_target": data.get("video_codec_target"),
-                "duration_seconds": data.get("duration_seconds") or data.get("duration")
+                "user_name": payload.get("UserName", "Unknown"),
+                "device_name": payload.get("DeviceName"),
+                "client_name": payload.get("ClientName"),
+                "video_quality": video_quality,
+                "is_transcoding": is_transcoding,
+                "is_direct_playing": is_direct_playing,
+                "transcoding_progress": 0,
+                "transcoding_speed": None,
+                "video_codec_source": payload.get("VideoCodec"),
+                "video_codec_target": payload.get("TranscodeVideoCodec") if is_transcoding else None,
+                "duration_seconds": duration_seconds
             }
             
             session = AnalyticsService.start_session(db, session_data)
             return {"status": "success", "session_id": session.id, "event": event_type}
         
         elif event_type == "playback.stop":
-            watched_seconds = data.get("watched_seconds") or data.get("playback_position")
+            # Position de lecture en secondes
+            playback_position_ticks = payload.get("PlaybackPositionTicks", 0)
+            watched_seconds = playback_position_ticks // 10000000 if playback_position_ticks else 0
+            
             session = AnalyticsService.stop_session(db, media_id, user_id, watched_seconds)
             
             if session:
@@ -103,7 +167,7 @@ async def receive_playback_webhook(
             session = AnalyticsService.pause_session(db, media_id, user_id)
             return {"status": "success", "session_id": session.id if session else None, "event": event_type}
         
-        elif event_type == "playback.unpause" or event_type == "playback.resume":
+        elif event_type == "playback.unpause":
             session = AnalyticsService.resume_session(db, media_id, user_id)
             return {"status": "success", "session_id": session.id if session else None, "event": event_type}
         
@@ -115,10 +179,13 @@ async def receive_playback_webhook(
         raise
     except Exception as e:
         logger.error(f"❌ Erreur lors du traitement du webhook : {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur serveur : {str(e)}"
         )
+
 
 
 # ============================================
