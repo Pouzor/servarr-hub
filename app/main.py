@@ -7,6 +7,7 @@ from app.core.security import verify_api_key
 from app.db import check_db_connection, init_db
 from app.api.routes import services, dashboard, jellyseerr, sync, analytics
 from app.schedulers.scheduler import app_scheduler
+from app.schedulers.analytics_scheduler import analytics_scheduler
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -24,12 +25,14 @@ async def lifespan(app: FastAPI):
     
     # Démarrer le scheduler (sync toutes les 15 minutes)
     app_scheduler.start(interval_minutes=15)
+    analytics_scheduler.start()
     
     yield
     
     # Shutdown
     print("🛑 Arrêt de l'application...")
     app_scheduler.stop()
+    analytics_scheduler.stop()
 
 # Créer l'application FastAPI
 app = FastAPI(
@@ -53,7 +56,7 @@ app.include_router(services.router, prefix="/api", dependencies=[Depends(verify_
 app.include_router(dashboard.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(jellyseerr.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(sync.router, prefix="/api", dependencies=[Depends(verify_api_key)])
-app.include_router(analytics.router, prefix="/api") # From jellyfin
+app.include_router(analytics.router, prefix="/api")
 
 @app.get("/")
 async def root():
@@ -63,7 +66,8 @@ async def root():
         "version": settings.APP_VERSION,
         "status": "running",
         "docs": "/docs",
-        "scheduler": "active" if app_scheduler.is_running else "inactive"
+        "scheduler": "active" if app_scheduler.is_running else "inactive",
+        "analytics_scheduler": "active" if analytics_scheduler.running else "inactive"  # NOUVEAU
     }
 
 @app.get("/health")
@@ -73,5 +77,6 @@ async def health_check():
     return {
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
-        "scheduler": "running" if app_scheduler.is_running else "stopped"
+        "scheduler": "running" if app_scheduler.is_running else "stopped",
+        "analytics_scheduler": "running" if analytics_scheduler.running else "stopped"  # NOUVEAU
     }

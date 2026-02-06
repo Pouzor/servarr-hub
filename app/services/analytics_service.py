@@ -359,3 +359,110 @@ class AnalyticsService:
         return db.query(PlaybackSession).filter(
             PlaybackSession.is_active == True
         ).order_by(desc(PlaybackSession.start_time)).all()
+
+    @staticmethod
+    def cleanup_orphan_sessions(db: Session, timeout_hours: int = 24):
+        """
+        Nettoie les sessions orphelines (actives depuis trop longtemps)
+        
+        Args:
+            db: Session DB
+            timeout_hours: Nombre d'heures après lesquelles une session est considérée orpheline
+        """
+        try:
+            from datetime import timedelta
+            cutoff_time = datetime.utcnow() - timedelta(hours=timeout_hours)
+            
+            # Trouver les sessions actives trop anciennes
+            orphan_sessions = db.query(PlaybackSession).filter(
+                PlaybackSession.is_active == True,
+                PlaybackSession.start_time < cutoff_time
+            ).all()
+            
+            count = 0
+            for session in orphan_sessions:
+                session.is_active = False
+                session.status = SessionStatus.STOPPED
+                session.end_time = datetime.utcnow()
+                
+                # Si watched_seconds est 0, estimer basé sur la durée
+                if session.watched_seconds == 0 and session.duration_seconds:
+                    # Estimer qu'ils ont regardé la moitié
+                    session.watched_seconds = session.duration_seconds // 2
+                
+                # Mettre à jour les statistiques
+                AnalyticsService.update_media_statistics(db, session)
+                AnalyticsService.update_daily_analytics(db, session)
+                
+                count += 1
+            
+            db.commit()
+            
+            if count > 0:
+                logger.info(f"🧹 {count} sessions orphelines nettoyées")
+            
+            return count
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors du nettoyage des sessions orphelines : {e}")
+            return 0
+    
+    @staticmethod
+    def update_device_statistics(db: Session, target_date: Optional[date] = None):
+        """
+        Met à jour les statistiques par appareil pour une date donnée
+        
+        Args:
+            db: Session DB
+            target_date: Date cible (par défaut : hier)
+        """
+        try:
+            if not target_date:
+                target_date = (datetime.utcnow() - timedelta(days=1)).date()
+            
+            # Pour chaque type d'appareil
+            for device_type in DeviceType:
+                # Compter les sessions
+                sessions = db.query(PlaybackSession).filter(
+                    func.date(PlaybackSession.start_time) == target_date,
+                    PlaybackSession.device_type == device_type
+                ).all()
+                
+                if not sessions:
+                    continue
+                
+                session_count = len(sessions)
+                total_duration = sum([s.watched_seconds for s in sessions])
+                unique_users = len(set([s.user_id for s in sessions]))
+                
+                # Vérifier si l'enregistrement existe
+                device_stat = db.query(DeviceStatistic).filter(
+                    DeviceStatistic.device_type == device_type,
+                    DeviceStatistic.period_start == target_date,
+                    DeviceStatistic.period_end == target_date
+                ).first()
+                
+                if device_stat:
+                    # Mettre à jour
+                    device_stat.session_count = session_count
+                    device_stat.total_duration_seconds = total_duration
+                    device_stat.unique_users = unique_users
+                else:
+                    # Créer
+                    device_stat = DeviceStatistic(
+                        device_type=device_type,
+                        period_start=target_date,
+                        period_end=target_date,
+                        session_count=session_count,
+                        total_duration_seconds=total_duration,
+                        unique_users=unique_users
+                    )
+                    db.add(device_stat)
+            
+            db.commit()
+            logger.info(f"📊 Statistiques par appareil mises à jour pour {target_date}")
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la mise à jour des device statistics : {e}")
