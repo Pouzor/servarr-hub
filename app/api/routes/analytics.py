@@ -33,28 +33,181 @@ async def receive_playback_webhook(
 ):
     """
     Endpoint pour recevoir les webhooks de lecture depuis Jellyfin
+    
+    Événements supportés :
+    - Play : Début de lecture
+    - Stop : Fin de lecture
+    - Pause : Mise en pause
+    - Resume : Reprise de lecture
     """
     try:
         # Récupérer le payload
         payload = await request.json()
         
-        # 🔍 DEBUG : Afficher le payload complet avec print()
-        print("\n" + "="*60)
-        print("📦 PAYLOAD COMPLET REÇU :")
-        import json
-        print(json.dumps(payload, indent=2, ensure_ascii=False))
-        print("="*60 + "\n")
+        # Extraire les données principales
+        event_type_raw = payload.get("Event")
+        item = payload.get("Item", {})
+        user = payload.get("User", {})
+        session = payload.get("Session", {})
+        play_state = session.get("PlayState", {})
         
-        return {"status": "debug", "received": True}
+        # Mapping des événements
+        event_mapping = {
+            "Play": "playback.start",
+            "Stop": "playback.stop",
+            "Pause": "playback.pause",
+            "Resume": "playback.unpause",
+        }
+        
+        event_type = event_mapping.get(event_type_raw)
+        
+        if not event_type:
+            logger.warning(f"⚠️  Type d'événement non supporté : {event_type_raw}")
+            return {"status": "ignored", "event": event_type_raw}
+        
+        logger.info(f"📥 Webhook reçu : {event_type} - {item.get('Name', 'Unknown')}")
+        
+        # Extraction des IDs
+        media_id = item.get("Id")
+        user_id = user.get("Id")
+        
+        if not media_id or not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Item.Id et User.Id sont requis"
+            )
+        
+        # Traitement selon le type d'événement
+        if event_type == "playback.start":
+            # Déterminer le type de média
+            item_type = item.get("Type", "Movie")
+            media_type = "tv" if item_type == "Episode" else "movie"
+            
+            # Info épisode si série
+            episode_info = None
+            if item_type == "Episode":
+                season = item.get("ParentIndexNumber", 0)
+                episode = item.get("IndexNumber", 0)
+                episode_info = f"S{season:02d}E{episode:02d}"
+            
+            # Extraire la qualité vidéo depuis les MediaStreams
+            media_streams = item.get("MediaStreams", [])
+            video_stream = next((s for s in media_streams if s.get("Type") == "Video"), {})
+            video_height = video_stream.get("Height", 0)
+            
+            # Mapper la qualité
+            quality_map = {
+                2160: "FOUR_K_HDR",
+                1080: "FULL_HD",
+                720: "HD",
+                480: "SD"
+            }
+            video_quality = quality_map.get(video_height, "UNKNOWN")
+            
+            # Codec vidéo source
+            video_codec_source = video_stream.get("Codec", "unknown")
+            
+            # Déterminer si c'est du transcodage
+            play_method = play_state.get("PlayMethod", "DirectPlay")
+            is_transcoding = play_method == "Transcode"
+            is_direct_playing = play_method == "DirectPlay"
+            
+            # Codec cible si transcodage (pas toujours disponible)
+            video_codec_target = None
+            if is_transcoding:
+                # Jellyfin ne fournit pas toujours le codec target, on peut l'estimer
+                video_codec_target = "h264"  # Par défaut pour le transcodage
+            
+            # Durée en secondes
+            run_time_ticks = item.get("RunTimeTicks", 0)
+            duration_seconds = run_time_ticks // 10000000 if run_time_ticks else None
+            
+            # Déterminer le type d'appareil
+            device_name = session.get("DeviceName", "Unknown")
+            client_name = session.get("Client", "Unknown")
+            
+            # Mapper vers DeviceType
+            device_type = "WEB_BROWSER"  # Par défaut
+            if "Chrome" in device_name or "Firefox" in device_name or "Safari" in device_name:
+                device_type = "WEB_BROWSER"
+            elif "Android" in device_name or "iOS" in device_name:
+                device_type = "MOBILE"
+            elif "TV" in device_name or "Roku" in device_name or "Fire" in device_name:
+                device_type = "TV"
+            
+            # URL du poster
+            server_id = item.get("ServerId")
+            poster_url = None
+            if item.get("ImageTags", {}).get("Primary"):
+                # Construire l'URL du poster (à adapter selon ton URL Jellyfin)
+                poster_url = f"/Items/{media_id}/Images/Primary"
+            
+            session_data = {
+                "media_id": media_id,
+                "media_title": item.get("Name", "Unknown"),
+                "media_type": media_type,
+                "media_year": item.get("ProductionYear"),
+                "episode_info": episode_info,
+                "poster_url": poster_url,
+                "user_id": user_id,
+                "user_name": user.get("Name", "Unknown"),
+                "device_name": device_name,
+                "client_name": client_name,
+                "video_quality": video_quality,
+                "is_transcoding": is_transcoding,
+                "is_direct_playing": is_direct_playing,
+                "transcoding_progress": 0,
+                "transcoding_speed": None,
+                "video_codec_source": video_codec_source,
+                "video_codec_target": video_codec_target,
+                "duration_seconds": duration_seconds
+            }
+            
+            session = AnalyticsService.start_session(db, session_data)
+            logger.info(f"✅ Session créée : {session.id} - {session.media_title}")
+            return {"status": "success", "session_id": session.id, "event": event_type}
+        
+        elif event_type == "playback.stop":
+            # Position de lecture en secondes
+            playback_position_ticks = play_state.get("PositionTicks", 0)
+            watched_seconds = playback_position_ticks // 10000000 if playback_position_ticks else 0
+            
+            session = AnalyticsService.stop_session(db, media_id, user_id, watched_seconds)
+            
+            if session:
+                logger.info(f"✅ Session arrêtée : {session.id} - {session.media_title} ({watched_seconds}s)")
+                return {"status": "success", "session_id": session.id, "event": event_type}
+            else:
+                logger.warning(f"⚠️  Aucune session active trouvée pour media_id={media_id}, user_id={user_id}")
+                return {"status": "no_active_session", "event": event_type}
+        
+        elif event_type == "playback.pause":
+            session = AnalyticsService.pause_session(db, media_id, user_id)
+            if session:
+                logger.info(f"⏸️  Session mise en pause : {session.id}")
+            return {"status": "success", "session_id": session.id if session else None, "event": event_type}
+        
+        elif event_type == "playback.unpause":
+            session = AnalyticsService.resume_session(db, media_id, user_id)
+            if session:
+                logger.info(f"▶️  Session reprise : {session.id}")
+            return {"status": "success", "session_id": session.id if session else None, "event": event_type}
+        
+        else:
+            logger.warning(f"⚠️  Événement non supporté : {event_type}")
+            return {"status": "ignored", "event": event_type}
     
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"❌ Erreur : {e}")
+        logger.error(f"❌ Erreur lors du traitement du webhook : {e}")
         import traceback
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur serveur : {str(e)}"
         )
+
 
 
 
