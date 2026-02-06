@@ -1,0 +1,361 @@
+"""
+Service de gestion des analytics et des sessions de lecture
+"""
+from datetime import datetime, date, timedelta
+from typing import Optional, Dict, Any, List
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
+from app.models.models import (
+    PlaybackSession, MediaStatistic, DeviceStatistic, 
+    DailyAnalytic, ServerMetric
+)
+from app.models.enums import (
+    DeviceType, PlaybackMethod, VideoQuality, 
+    SessionStatus, MediaType
+)
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+class AnalyticsService:
+    """Service pour gérer les analytics de lecture"""
+    
+    @staticmethod
+    def map_device_type(client_name: str, device_name: str) -> DeviceType:
+        """Détermine le type d'appareil basé sur le client et le device name"""
+        client_lower = client_name.lower() if client_name else ""
+        device_lower = device_name.lower() if device_name else ""
+        
+        # Web browsers
+        if any(browser in client_lower for browser in ["chrome", "firefox", "safari", "edge", "web"]):
+            return DeviceType.WEB_BROWSER
+        
+        # Mobile apps
+        if any(mobile in client_lower or mobile in device_lower for mobile in ["android", "ios", "iphone", "ipad", "mobile"]):
+            return DeviceType.MOBILE_APP
+        
+        # Smart TVs
+        if any(tv in device_lower for tv in ["tv", "roku", "firestick", "fire tv", "apple tv", "chromecast"]):
+            return DeviceType.SMART_TV
+        
+        # Desktop apps
+        if any(desktop in client_lower for desktop in ["windows", "macos", "linux", "desktop"]):
+            return DeviceType.DESKTOP_APP
+        
+        # Game consoles
+        if any(console in device_lower for console in ["xbox", "playstation", "ps4", "ps5"]):
+            return DeviceType.GAME_CONSOLE
+        
+        # Streaming devices
+        if any(stream in device_lower for stream in ["chromecast", "roku", "fire stick"]):
+            return DeviceType.STREAMING_DEVICE
+        
+        return DeviceType.OTHER
+    
+    @staticmethod
+    def map_video_quality(quality_str: Optional[str]) -> VideoQuality:
+        """Convertit une chaîne de qualité en enum VideoQuality"""
+        if not quality_str:
+            return VideoQuality.UNKNOWN
+        
+        quality_lower = quality_str.lower()
+        
+        if "4k" in quality_lower and "hdr" in quality_lower:
+            return VideoQuality.FOUR_K_HDR
+        elif "4k" in quality_lower or "2160p" in quality_lower:
+            return VideoQuality.FOUR_K
+        elif "1080p" in quality_lower or "full hd" in quality_lower:
+            return VideoQuality.FULL_HD
+        elif "720p" in quality_lower or "hd" in quality_lower:
+            return VideoQuality.HD
+        elif "480p" in quality_lower:
+            return VideoQuality.SD
+        elif "360p" in quality_lower:
+            return VideoQuality.LOW
+        
+        return VideoQuality.UNKNOWN
+    
+    @staticmethod
+    def map_playback_method(is_transcoding: bool, is_direct_playing: bool) -> PlaybackMethod:
+        """Détermine la méthode de lecture"""
+        if is_transcoding:
+            return PlaybackMethod.TRANSCODED
+        elif is_direct_playing:
+            return PlaybackMethod.DIRECT_PLAY
+        else:
+            return PlaybackMethod.DIRECT_STREAM
+    
+    @staticmethod
+    def start_session(db: Session, session_data: Dict[str, Any]) -> PlaybackSession:
+        """
+        Démarre une nouvelle session de lecture
+        
+        Args:
+            db: Session SQLAlchemy
+            session_data: Données de la session depuis le webhook
+        """
+        try:
+            # Mapper les types
+            device_type = AnalyticsService.map_device_type(
+                session_data.get("client_name", ""),
+                session_data.get("device_name", "")
+            )
+            
+            video_quality = AnalyticsService.map_video_quality(
+                session_data.get("video_quality")
+            )
+            
+            playback_method = AnalyticsService.map_playback_method(
+                session_data.get("is_transcoding", False),
+                session_data.get("is_direct_playing", True)
+            )
+            
+            # Créer la session
+            session = PlaybackSession(
+                media_id=session_data.get("media_id"),
+                media_title=session_data.get("media_title"),
+                media_type=MediaType(session_data.get("media_type", "movie")),
+                media_year=session_data.get("media_year"),
+                episode_info=session_data.get("episode_info"),
+                poster_url=session_data.get("poster_url"),
+                user_id=session_data.get("user_id"),
+                user_name=session_data.get("user_name"),
+                device_type=device_type,
+                device_name=session_data.get("device_name"),
+                client_name=session_data.get("client_name"),
+                video_quality=video_quality,
+                playback_method=playback_method,
+                transcoding_progress=session_data.get("transcoding_progress", 0),
+                transcoding_speed=session_data.get("transcoding_speed"),
+                video_codec_source=session_data.get("video_codec_source"),
+                video_codec_target=session_data.get("video_codec_target"),
+                start_time=datetime.utcnow(),
+                duration_seconds=session_data.get("duration_seconds"),
+                watched_seconds=0,
+                status=SessionStatus.ACTIVE,
+                is_active=True
+            )
+            
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+            
+            logger.info(f"✅ Session créée : {session.id} - {session.media_title}")
+            return session
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la création de session : {e}")
+            raise
+    
+    @staticmethod
+    def stop_session(
+        db: Session, 
+        media_id: str, 
+        user_id: str, 
+        watched_seconds: Optional[int] = None
+    ) -> Optional[PlaybackSession]:
+        """
+        Arrête une session de lecture active
+        
+        Args:
+            db: Session SQLAlchemy
+            media_id: ID du média
+            user_id: ID de l'utilisateur
+            watched_seconds: Durée regardée (optionnel)
+        """
+        try:
+            # Trouver la session active
+            session = db.query(PlaybackSession).filter(
+                PlaybackSession.media_id == media_id,
+                PlaybackSession.user_id == user_id,
+                PlaybackSession.is_active == True
+            ).order_by(desc(PlaybackSession.start_time)).first()
+            
+            if not session:
+                logger.warning(f"⚠️  Aucune session active trouvée pour media_id={media_id}, user_id={user_id}")
+                return None
+            
+            # Mettre à jour la session
+            session.end_time = datetime.utcnow()
+            session.status = SessionStatus.STOPPED
+            session.is_active = False
+            
+            if watched_seconds is not None:
+                session.watched_seconds = watched_seconds
+            
+            db.commit()
+            db.refresh(session)
+            
+            logger.info(f"✅ Session arrêtée : {session.id} - {session.media_title}")
+            
+            # Mettre à jour les statistiques
+            AnalyticsService.update_media_statistics(db, session)
+            AnalyticsService.update_daily_analytics(db, session)
+            
+            return session
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de l'arrêt de session : {e}")
+            raise
+    
+    @staticmethod
+    def pause_session(db: Session, media_id: str, user_id: str) -> Optional[PlaybackSession]:
+        """Met en pause une session active"""
+        try:
+            session = db.query(PlaybackSession).filter(
+                PlaybackSession.media_id == media_id,
+                PlaybackSession.user_id == user_id,
+                PlaybackSession.is_active == True
+            ).order_by(desc(PlaybackSession.start_time)).first()
+            
+            if session:
+                session.status = SessionStatus.PAUSED
+                db.commit()
+                db.refresh(session)
+                logger.info(f"⏸️  Session en pause : {session.id}")
+            
+            return session
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la pause : {e}")
+            raise
+    
+    @staticmethod
+    def resume_session(db: Session, media_id: str, user_id: str) -> Optional[PlaybackSession]:
+        """Reprend une session en pause"""
+        try:
+            session = db.query(PlaybackSession).filter(
+                PlaybackSession.media_id == media_id,
+                PlaybackSession.user_id == user_id,
+                PlaybackSession.is_active == True
+            ).order_by(desc(PlaybackSession.start_time)).first()
+            
+            if session:
+                session.status = SessionStatus.ACTIVE
+                db.commit()
+                db.refresh(session)
+                logger.info(f"▶️  Session reprise : {session.id}")
+            
+            return session
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la reprise : {e}")
+            raise
+    
+    @staticmethod
+    def update_media_statistics(db: Session, session: PlaybackSession):
+        """Met à jour les statistiques du média après une session"""
+        try:
+            # Récupérer ou créer les stats du média
+            media_stat = db.query(MediaStatistic).filter(
+                MediaStatistic.media_id == session.media_id
+            ).first()
+            
+            if not media_stat:
+                media_stat = MediaStatistic(
+                    media_id=session.media_id,
+                    media_title=session.media_title,
+                    media_type=session.media_type,
+                    media_year=session.media_year,
+                    poster_url=session.poster_url,
+                    total_plays=0,
+                    total_duration_seconds=session.duration_seconds or 0,
+                    total_watched_seconds=0,
+                    unique_users=0,
+                    direct_play_count=0,
+                    transcoded_count=0,
+                    first_played_at=session.start_time
+                )
+                db.add(media_stat)
+            
+            # Mettre à jour les compteurs
+            media_stat.total_plays += 1
+            media_stat.total_watched_seconds += session.watched_seconds
+            media_stat.last_played_at = session.end_time or datetime.utcnow()
+            
+            if session.playback_method == PlaybackMethod.DIRECT_PLAY:
+                media_stat.direct_play_count += 1
+            elif session.playback_method == PlaybackMethod.TRANSCODED:
+                media_stat.transcoded_count += 1
+            
+            # Calculer les utilisateurs uniques
+            unique_users_count = db.query(func.count(func.distinct(PlaybackSession.user_id))).filter(
+                PlaybackSession.media_id == session.media_id
+            ).scalar()
+            media_stat.unique_users = unique_users_count
+            
+            db.commit()
+            logger.info(f"📊 Stats média mises à jour : {media_stat.media_title}")
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la mise à jour des stats média : {e}")
+    
+    @staticmethod
+    def update_daily_analytics(db: Session, session: PlaybackSession):
+        """Met à jour les analytics quotidiennes"""
+        try:
+            session_date = session.start_time.date()
+            
+            # Récupérer ou créer les analytics du jour
+            daily_stat = db.query(DailyAnalytic).filter(
+                DailyAnalytic.date == session_date
+            ).first()
+            
+            if not daily_stat:
+                daily_stat = DailyAnalytic(
+                    date=session_date,
+                    total_plays=0,
+                    hours_watched=0.0,
+                    unique_users=0,
+                    unique_media=0,
+                    movies_played=0,
+                    tv_episodes_played=0,
+                    direct_play_count=0,
+                    transcoded_count=0
+                )
+                db.add(daily_stat)
+            
+            # Mettre à jour les compteurs
+            daily_stat.total_plays += 1
+            daily_stat.hours_watched += session.watched_seconds / 3600.0  # Convertir en heures
+            
+            if session.media_type == MediaType.MOVIE:
+                daily_stat.movies_played += 1
+            elif session.media_type == MediaType.TV:
+                daily_stat.tv_episodes_played += 1
+            
+            if session.playback_method == PlaybackMethod.DIRECT_PLAY:
+                daily_stat.direct_play_count += 1
+            elif session.playback_method == PlaybackMethod.TRANSCODED:
+                daily_stat.transcoded_count += 1
+            
+            # Calculer les utilisateurs et médias uniques du jour
+            unique_users = db.query(func.count(func.distinct(PlaybackSession.user_id))).filter(
+                func.date(PlaybackSession.start_time) == session_date
+            ).scalar()
+            daily_stat.unique_users = unique_users
+            
+            unique_media = db.query(func.count(func.distinct(PlaybackSession.media_id))).filter(
+                func.date(PlaybackSession.start_time) == session_date
+            ).scalar()
+            daily_stat.unique_media = unique_media
+            
+            db.commit()
+            logger.info(f"📅 Analytics quotidiennes mises à jour : {session_date}")
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Erreur lors de la mise à jour des analytics quotidiennes : {e}")
+    
+    @staticmethod
+    def get_active_sessions(db: Session) -> List[PlaybackSession]:
+        """Récupère toutes les sessions actives"""
+        return db.query(PlaybackSession).filter(
+            PlaybackSession.is_active == True
+        ).order_by(desc(PlaybackSession.start_time)).all()

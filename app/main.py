@@ -5,9 +5,8 @@ from contextlib import asynccontextmanager
 from app.core.config import settings
 from app.core.security import verify_api_key
 from app.db import check_db_connection, init_db
-from app.api.routes import services, dashboard, jellyseerr, sync
+from app.api.routes import services, dashboard, jellyseerr, sync, analytics
 from app.schedulers.scheduler import app_scheduler
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -32,7 +31,6 @@ async def lifespan(app: FastAPI):
     print("🛑 Arrêt de l'application...")
     app_scheduler.stop()
 
-
 # Créer l'application FastAPI
 app = FastAPI(
     title=settings.APP_NAME,
@@ -55,7 +53,7 @@ app.include_router(services.router, prefix="/api", dependencies=[Depends(verify_
 app.include_router(dashboard.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(jellyseerr.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(sync.router, prefix="/api", dependencies=[Depends(verify_api_key)])
-
+app.include_router(analytics.router, prefix="/api") # From jellyfin
 
 @app.get("/")
 async def root():
@@ -67,7 +65,6 @@ async def root():
         "docs": "/docs",
         "scheduler": "active" if app_scheduler.is_running else "inactive"
     }
-
 
 @app.get("/health")
 async def health_check():
