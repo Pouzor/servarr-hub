@@ -8,7 +8,7 @@ engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,  # Vérifier la connexion avant utilisation
     pool_recycle=3600,   # Recycler les connexions après 1h
-    echo=settings.DEBUG  # Afficher les requêtes SQL en mode debug
+    echo=False  # Afficher les requêtes SQL en mode debug
 )
 
 # Session factory
