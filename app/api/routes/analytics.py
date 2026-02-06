@@ -38,19 +38,19 @@ async def receive_playback_webhook(
         # Récupérer le payload
         payload = await request.json()
         
-        # 🔍 DEBUG : Afficher le payload complet
-        logger.info("="*60)
-        logger.info("📦 PAYLOAD COMPLET REÇU :")
+        # 🔍 DEBUG : Afficher le payload complet avec print()
+        print("\n" + "="*60)
+        print("📦 PAYLOAD COMPLET REÇU :")
         import json
-        logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
-        logger.info("="*60)
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print("="*60 + "\n")
         
         return {"status": "debug", "received": True}
     
     except Exception as e:
-        logger.error(f"❌ Erreur : {e}")
+        print(f"❌ Erreur : {e}")
         import traceback
-        logger.error(traceback.format_exc())
+        print(traceback.format_exc())
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur serveur : {str(e)}"
