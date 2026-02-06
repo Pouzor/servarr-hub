@@ -37,3 +37,32 @@ class CalendarStatus(str, enum.Enum):
     MONITORED = "monitored"
     DOWNLOADING = "downloading"
     AVAILABLE = "available"
+
+class DeviceType(str, enum.Enum):
+    WEB_BROWSER = "web_browser"
+    MOBILE_APP = "mobile_app"
+    SMART_TV = "smart_tv"
+    DESKTOP_APP = "desktop_app"
+    GAME_CONSOLE = "game_console"
+    STREAMING_DEVICE = "streaming_device"
+    OTHER = "other"
+
+class PlaybackMethod(str, enum.Enum):
+    DIRECT_PLAY = "direct_play"
+    DIRECT_STREAM = "direct_stream"
+    TRANSCODED = "transcoded"
+
+class VideoQuality(str, enum.Enum):
+    FOUR_K_HDR = "4k_hdr"
+    FOUR_K = "4k"
+    FULL_HD = "1080p"
+    HD = "720p"
+    SD = "480p"
+    LOW = "360p"
+    UNKNOWN = "unknown"
+
+class SessionStatus(str, enum.Enum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+    BUFFERING = "buffering"
