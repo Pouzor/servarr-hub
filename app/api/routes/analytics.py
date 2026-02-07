@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, date
 from app.db import get_db
 from app.services.analytics_service import AnalyticsService
 from app.core.security import verify_api_key
+from app.core.config import settings
 from app.models.models import (
     PlaybackSession, MediaStatistic, DeviceStatistic, 
     DailyAnalytic, ServerMetric
@@ -25,6 +26,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
+
+
+# ============================================
+# WEBHOOK ENDPOINT (PUBLIC)
+# ============================================
 
 @router.post("/webhook/playback", status_code=status.HTTP_200_OK)
 async def receive_playback_webhook(
@@ -112,10 +118,9 @@ async def receive_playback_webhook(
             is_transcoding = play_method == "Transcode"
             is_direct_playing = play_method == "DirectPlay"
             
-            # Codec cible si transcodage (pas toujours disponible)
+            # Codec cible si transcodage
             video_codec_target = None
             if is_transcoding:
-                # Jellyfin ne fournit pas toujours le codec target, on peut l'estimer
                 video_codec_target = "h264"  # Par défaut pour le transcodage
             
             # Durée en secondes
@@ -135,12 +140,12 @@ async def receive_playback_webhook(
             elif "TV" in device_name or "Roku" in device_name or "Fire" in device_name:
                 device_type = "TV"
             
-            # URL du poster
-            server_id = item.get("ServerId")
+            # URL du poster : Utiliser l'URL publique de Jellyfin
             poster_url = None
             if item.get("ImageTags", {}).get("Primary"):
-                # Construire l'URL du poster (à adapter selon ton URL Jellyfin)
-                poster_url = f"/Items/{media_id}/Images/Primary"
+                # Configuration de l'URL publique Jellyfin
+                jellyfin_url = getattr(settings, 'JELLYFIN_PUBLIC_URL', 'https://changeme.com')
+                poster_url = f"{jellyfin_url}/Items/{media_id}/Images/Primary"
             
             session_data = {
                 "media_id": media_id,
@@ -207,8 +212,6 @@ async def receive_playback_webhook(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erreur serveur : {str(e)}"
         )
-
-
 
 
 # ============================================
@@ -291,8 +294,8 @@ async def get_media_playback_analytics(
         results = []
         for stat in media_stats:
             # Formater la durée (ex: "2h 28m")
-            hours = stat.total_duration_seconds // 3600
-            minutes = (stat.total_duration_seconds % 3600) // 60
+            hours = stat.total_watched_seconds // 3600
+            minutes = (stat.total_watched_seconds % 3600) // 60
             duration_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
             
             # Déterminer le status

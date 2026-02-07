@@ -16,7 +16,8 @@ class Settings(BaseSettings):
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
     DEBUG: bool = False
-    
+    JELLYFIN_PUBLIC_URL: str
+
     # Security
     SECRET_KEY: str
     API_KEY: str
