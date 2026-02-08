@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime, date
 from app.models.enums import (
@@ -8,25 +8,57 @@ from app.models.enums import (
 )
 
 # ============================================
-# SCHEMAS EXISTANTS
+# SERVICE CONFIGURATION SCHEMAS (MODIFIÉ)
 # ============================================
 
-# Service Configuration Schemas
 class ServiceConfigurationBase(BaseModel):
     service_name: ServiceType
     url: str
-    api_key: str
+    api_key: Optional[str] = None  # ⬅️ MODIFIÉ : Optionnel
     port: Optional[int] = None
+    username: Optional[str] = None  # ⬅️ NOUVEAU
+    password: Optional[str] = None  # ⬅️ NOUVEAU
     is_active: bool = True
+    
+    @field_validator('api_key', 'username', 'password')
+    @classmethod
+    def validate_credentials(cls, v, info):
+        """Valide que soit api_key soit username/password est fourni"""
+        # Cette validation sera faite au niveau du endpoint
+        return v
+
 
 class ServiceConfigurationCreate(ServiceConfigurationBase):
-    pass
+    """Schéma pour créer un service"""
+    
+    @field_validator('service_name')
+    @classmethod
+    def validate_service_credentials(cls, v, info):
+        """Valide les credentials selon le type de service"""
+        data = info.data
+        service_name = v
+        
+        # Services qui utilisent API key
+        if service_name in [ServiceType.RADARR, ServiceType.SONARR, ServiceType.JELLYFIN, ServiceType.JELLYSEERR]:
+            if not data.get('api_key'):
+                raise ValueError(f"{service_name.value} nécessite une api_key")
+        
+        # Services qui utilisent username/password
+        elif service_name == ServiceType.QBITTORRENT:
+            if not data.get('username') or not data.get('password'):
+                raise ValueError("qBittorrent nécessite username et password")
+        
+        return v
+
 
 class ServiceConfigurationUpdate(BaseModel):
     url: Optional[str] = None
     api_key: Optional[str] = None
     port: Optional[int] = None
+    username: Optional[str] = None  # ⬅️ NOUVEAU
+    password: Optional[str] = None  # ⬅️ NOUVEAU
     is_active: Optional[bool] = None
+
 
 class ServiceConfigurationResponse(ServiceConfigurationBase):
     id: str
@@ -36,8 +68,16 @@ class ServiceConfigurationResponse(ServiceConfigurationBase):
     created_at: datetime
     updated_at: datetime
     
+    # Ne pas exposer le password dans les réponses
+    password: Optional[str] = Field(None, exclude=True)
+    
     class Config:
         from_attributes = True
+
+
+# ============================================
+# SCHEMAS EXISTANTS (INCHANGÉS)
+# ============================================
 
 # Dashboard Statistics Schemas
 class DashboardStatisticResponse(BaseModel):
@@ -52,6 +92,7 @@ class DashboardStatisticResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 # Library Item Schemas
 class LibraryItemResponse(BaseModel):
     id: str
@@ -65,10 +106,12 @@ class LibraryItemResponse(BaseModel):
     description: Optional[str] = None
     added_date: str
     size: str
+    torrent_info: Optional[Dict[str, Any]] = None  # ⬅️ NOUVEAU
     created_at: datetime
     
     class Config:
         from_attributes = True
+
 
 # Calendar Event Schemas
 class CalendarEventResponse(BaseModel):
@@ -84,6 +127,7 @@ class CalendarEventResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
 
 # Jellyseerr Request Schemas
 class JellyseerrRequestResponse(BaseModel):
@@ -103,9 +147,11 @@ class JellyseerrRequestResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class JellyseerrRequestAction(BaseModel):
     request_id: str
     action: str = Field(..., pattern="^(approve|decline)$")
+
 
 # Sync Metadata Schemas
 class SyncMetadataResponse(BaseModel):
@@ -122,6 +168,7 @@ class SyncMetadataResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
 
 # Dashboard Response
 class DashboardResponse(BaseModel):
