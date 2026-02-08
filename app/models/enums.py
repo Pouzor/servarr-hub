@@ -6,6 +6,7 @@ class ServiceType(str, enum.Enum):
     JELLYSEERR = "jellyseerr"
     SONARR = "sonarr"
     RADARR = "radarr"
+    QBITTORRENT = "qbittorrent"
 
 
 class StatType(str, enum.Enum):
