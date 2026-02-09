@@ -131,7 +131,8 @@ class PlaybackSession(Base):
     media_year = Column(Integer)
     episode_info = Column(Text)  # Ex: "S04E09" pour les séries
     poster_url = Column(Text)
-    
+    library_item_id = Column(String(36), nullable=True, index=True)
+
     # Informations utilisateur
     user_id = Column(String(255), nullable=False, index=True)  # ID utilisateur Jellyfin
     user_name = Column(Text, nullable=False)

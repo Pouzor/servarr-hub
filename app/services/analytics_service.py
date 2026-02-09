@@ -119,6 +119,7 @@ class AnalyticsService:
                 media_year=session_data.get("media_year"),
                 episode_info=session_data.get("episode_info"),
                 poster_url=session_data.get("poster_url"),
+                library_item_id=session_data.get("library_item_id"),
                 user_id=session_data.get("user_id"),
                 user_name=session_data.get("user_name"),
                 device_type=device_type,

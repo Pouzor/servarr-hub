@@ -11,8 +11,8 @@ from app.services.analytics_service import AnalyticsService
 from app.core.security import verify_api_key
 from app.core.config import settings
 from app.models.models import (
-    PlaybackSession, MediaStatistic, DeviceStatistic, 
-    DailyAnalytic, ServerMetric
+    PlaybackSession, MediaStatistic, DeviceStatistic,
+    DailyAnalytic, ServerMetric, LibraryItem
 )
 from app.models.enums import MediaType, DeviceType
 from app.api.schemas import (
@@ -168,6 +168,25 @@ async def receive_playback_webhook(
                 "duration_seconds": duration_seconds
             }
             
+            # Recherche du LibraryItem correspondant
+            library_item = None
+            if media_type == "movie":
+                library_item = db.query(LibraryItem).filter(
+                    LibraryItem.title == item.get("Name"),
+                    LibraryItem.media_type == MediaType.MOVIE,
+                    LibraryItem.year == item.get("ProductionYear")
+                ).first()
+            elif media_type == "tv":
+                series_name = item.get("SeriesName")
+                if series_name:
+                    library_item = db.query(LibraryItem).filter(
+                        LibraryItem.title == series_name,
+                        LibraryItem.media_type == MediaType.TV
+                    ).first()
+
+            if library_item:
+                session_data["library_item_id"] = library_item.id
+
             session = AnalyticsService.start_session(db, session_data)
             logger.info(f"✅ Session créée : {session.id} - {session.media_title}")
             return {"status": "success", "session_id": session.id, "event": event_type}

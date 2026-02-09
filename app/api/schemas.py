@@ -189,6 +189,7 @@ class PlaybackSessionResponse(BaseModel):
     media_year: Optional[int] = None
     episode_info: Optional[str] = None
     poster_url: Optional[str] = None
+    library_item_id: Optional[str] = None
     user_id: str
     user_name: str
     device_type: DeviceType
