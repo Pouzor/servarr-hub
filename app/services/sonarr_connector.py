@@ -1,7 +1,6 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 from app.services.base_connector import BaseConnector
-
 
 class SonarrConnector(BaseConnector):
     """Connecteur pour l'API Sonarr"""
@@ -74,10 +73,10 @@ class SonarrConnector(BaseConnector):
         try:
             series = await self.get_series()
             
-            # Filtrer par date d'ajout - FIX: utiliser timezone-aware datetime
+            # Filtrer par date d'ajout
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            recent = []
             
+            recent = []
             for serie in series:
                 if not serie.get("added"):
                     continue
@@ -90,15 +89,88 @@ class SonarrConnector(BaseConnector):
                 except (ValueError, AttributeError) as e:
                     # Ignorer les films avec des dates invalides
                     continue
-
-
+            
             # Trier par date d'ajout
             recent.sort(key=lambda x: x.get("added", ""), reverse=True)
-            
             return recent
+            
         except Exception as e:
             print(f"❌ Erreur récupération séries récentes: {e}")
             return []
+    
+    async def get_history(self, page_size: int = 50) -> List[Dict[str, Any]]:
+        """
+        Récupérer l'historique des téléchargements
+        
+        Args:
+            page_size: Nombre d'enregistrements à récupérer
+            
+        Returns:
+            Liste des événements d'historique avec downloadId
+        """
+        try:
+            params = {
+                "pageSize": page_size,
+                "sortKey": "date",
+                "sortDirection": "descending",
+                "eventType": 3  # 3 = Downloaded for Sonarr
+            }
+            
+            response = await self._get("/api/v3/history", params=params)
+            records = response.get("records", [])
+            
+            return records
+            
+        except Exception as e:
+            print(f"❌ Erreur récupération historique Sonarr: {e}")
+            return []
+    
+    async def get_series_history_map(self) -> Dict[int, str]:
+        """
+        Créer une map {seriesId: torrent_hash}
+        
+        Returns:
+            Dictionnaire associant les IDs de séries aux hash de torrents
+        """
+        history = await self.get_history(page_size=200)
+        series_hash_map = {}
+        
+        for record in history:
+            series_id = record.get("seriesId")
+            download_id = record.get("downloadId", "")
+            
+            if series_id and download_id:
+                # Extraire le hash du downloadId
+                hash_value = self._extract_hash(download_id)
+                if hash_value:
+                    series_hash_map[series_id] = hash_value
+        
+        return series_hash_map
+    
+    def _extract_hash(self, download_id: str) -> Optional[str]:
+        """
+        Extraire le hash du torrent depuis le downloadId
+        
+        Args:
+            download_id: ID du téléchargement (ex: "qBittorrent-HASH" ou "HASH")
+            
+        Returns:
+            Hash du torrent ou None
+        """
+        if not download_id:
+            return None
+        
+        # Si format "qBittorrent-HASH"
+        if "-" in download_id:
+            parts = download_id.split("-", 1)
+            if len(parts) == 2:
+                return parts[1].upper()
+        
+        # Si c'est directement le hash (40 caractères hexadécimaux)
+        if len(download_id) == 40 and all(c in "0123456789ABCDEFabcdef" for c in download_id):
+            return download_id.upper()
+        
+        return None
     
     async def get_statistics(self) -> Dict[str, Any]:
         """
@@ -124,6 +196,7 @@ class SonarrConnector(BaseConnector):
                 "downloaded_episodes": downloaded_episodes,
                 "missing_episodes": missing_episodes
             }
+            
         except Exception as e:
             print(f"❌ Erreur récupération stats Sonarr: {e}")
             return {}

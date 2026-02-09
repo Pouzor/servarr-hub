@@ -2,7 +2,6 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta, timezone
 from app.services.base_connector import BaseConnector
 
-
 class RadarrConnector(BaseConnector):
     """Connecteur pour l'API Radarr"""
     
@@ -74,10 +73,10 @@ class RadarrConnector(BaseConnector):
         try:
             movies = await self.get_movies()
             
-            # Filtrer par date d'ajout - FIX: utiliser timezone-aware datetime
+            # Filtrer par date d'ajout
             cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
-            recent = []
             
+            recent = []
             for movie in movies:
                 if not movie.get("added"):
                     continue
@@ -93,11 +92,86 @@ class RadarrConnector(BaseConnector):
             
             # Trier par date d'ajout (plus récent en premier)
             recent.sort(key=lambda x: x.get("added", ""), reverse=True)
-            
             return recent
+            
         except Exception as e:
             print(f"❌ Erreur récupération films récents: {e}")
             return []
+    
+    async def get_history(self, page_size: int = 50) -> List[Dict[str, Any]]:
+        """
+        Récupérer l'historique des téléchargements
+        
+        Args:
+            page_size: Nombre d'enregistrements à récupérer
+            
+        Returns:
+            Liste des événements d'historique avec downloadId
+        """
+        try:
+            params = {
+                "pageSize": page_size,
+                "sortKey": "date",
+                "sortDirection": "descending",
+                "eventType": 1  # 1 = Downloaded
+            }
+            
+            response = await self._get("/api/v3/history", params=params)
+            records = response.get("records", [])
+            
+            return records
+            
+        except Exception as e:
+            print(f"❌ Erreur récupération historique Radarr: {e}")
+            return []
+    
+    async def get_movie_history_map(self) -> Dict[int, str]:
+        """
+        Créer une map {movieId: torrent_hash}
+        
+        Returns:
+            Dictionnaire associant les IDs de films aux hash de torrents
+        """
+        history = await self.get_history(page_size=200)
+        movie_hash_map = {}
+        
+        for record in history:
+            movie_id = record.get("movieId")
+            download_id = record.get("downloadId", "")
+            
+            if movie_id and download_id:
+                # Extraire le hash du downloadId
+                # Format possible: "qBittorrent-HASH" ou juste "HASH"
+                hash_value = self._extract_hash(download_id)
+                if hash_value:
+                    movie_hash_map[movie_id] = hash_value
+        
+        return movie_hash_map
+    
+    def _extract_hash(self, download_id: str) -> Optional[str]:
+        """
+        Extraire le hash du torrent depuis le downloadId
+        
+        Args:
+            download_id: ID du téléchargement (ex: "qBittorrent-HASH" ou "HASH")
+            
+        Returns:
+            Hash du torrent ou None
+        """
+        if not download_id:
+            return None
+        
+        # Si format "qBittorrent-HASH"
+        if "-" in download_id:
+            parts = download_id.split("-", 1)
+            if len(parts) == 2:
+                return parts[1].upper()
+        
+        # Si c'est directement le hash (40 caractères hexadécimaux)
+        if len(download_id) == 40 and all(c in "0123456789ABCDEFabcdef" for c in download_id):
+            return download_id.upper()
+        
+        return None
     
     async def get_statistics(self) -> Dict[str, Any]:
         """
@@ -115,11 +189,12 @@ class RadarrConnector(BaseConnector):
             missing = monitored - downloaded
             
             return {
-                "total": total,
-                "monitored": monitored,
-                "downloaded": downloaded,
-                "missing": missing
+                "total_movies": total,
+                "monitored_movies": monitored,
+                "downloaded_movies": downloaded,
+                "missing_movies": missing
             }
+            
         except Exception as e:
             print(f"❌ Erreur récupération stats Radarr: {e}")
             return {}

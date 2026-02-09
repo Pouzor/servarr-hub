@@ -160,20 +160,25 @@ class SyncService:
         """Synchroniser les données Radarr"""
         print("🎬 Synchronisation Radarr...")
         start_time = time.time()
-        
+
         service = self.get_active_service(ServiceType.RADARR)
         if not service:
-            print("⚠️  Service Radarr non configuré")
+            print("⚠️ Service Radarr non configuré")
             return {"success": False, "message": "Service non configuré"}
-        
+
         connector = RadarrConnector(base_url=service.url, api_key=service.api_key, port=service.port)
-        
+
         try:
             # Récupérer les films récents
             recent_movies = await connector.get_recent_additions(days=30)
-            
+
+            # Récupérer la map movieId -> torrent_hash
+            movie_hash_map = await connector.get_movie_history_map()
+            print(f"📥 {len(movie_hash_map)} hash de torrents récupérés depuis Radarr")
+
             # Ajouter à la DB (éviter les doublons)
             added_count = 0
+
             for movie in recent_movies[:20]:  # Limiter à 20 pour ne pas surcharger
                 # Vérifier si existe déjà (par titre + année)
                 existing = self.db.query(LibraryItem).filter(
@@ -181,12 +186,12 @@ class SyncService:
                     LibraryItem.year == movie.get("year"),
                     LibraryItem.media_type == MediaType.MOVIE
                 ).first()
-                
+
                 if not existing:
                     # Calculer la taille
                     size_bytes = movie.get("sizeOnDisk", 0)
                     size_gb = round(size_bytes / (1024**3), 1)
-                    
+
                     # Date d'ajout
                     added_date = movie.get("added", "")
                     if added_date:
@@ -194,34 +199,44 @@ class SyncService:
                         time_ago = self._format_time_ago(added_dt)
                     else:
                         time_ago = "Unknown"
-                    
+
                     # Récupérer l'image
                     image_url = ""
                     for img in movie.get("images", []):
                         if img.get("coverType") == "poster":
                             image_url = img.get("remoteUrl", "")
                             break
+                        
                     if not image_url and movie.get("images"):
                         image_url = movie.get("images", [{}])[0].get("remoteUrl", "")
-                    
+
+                    # Récupérer le torrent_hash depuis la map
+                    movie_id = movie.get("id")
+                    torrent_hash = movie_hash_map.get(movie_id) if movie_id else None
+
                     item = LibraryItem(
                         title=movie.get("title", "Unknown"),
                         year=movie.get("year", 0),
                         media_type=MediaType.MOVIE,
                         image_url=image_url,
                         image_alt=f"{movie.get('title')} poster",
-                        quality=movie.get("qualityProfileId", "Unknown"),
+                        quality=str(movie.get("qualityProfileId", "Unknown")),
                         rating=str(movie.get("ratings", {}).get("imdb", {}).get("value", "")),
                         description=movie.get("overview", ""),
                         added_date=time_ago,
-                        size=f"{size_gb} GB"
+                        size=f"{size_gb} GB",
+                        torrent_hash=torrent_hash  # ← NOUVEAU
                     )
+
                     self.db.add(item)
                     added_count += 1
-            
+
+                    if torrent_hash:
+                        print(f"  ✅ {movie.get('title')} - hash: {torrent_hash[:8]}...")
+
             # Récupérer le calendrier
             calendar = await connector.get_calendar(days_ahead=30)
-            
+
             # Ajouter au calendrier
             calendar_count = 0
             for event in calendar[:20]:
@@ -240,7 +255,7 @@ class SyncService:
                     CalendarEvent.title == event.get("title"),
                     CalendarEvent.release_date == release_date
                 ).first()
-                
+
                 if not existing:
                     # Récupérer l'image
                     image_url = ""
@@ -248,9 +263,10 @@ class SyncService:
                         if img.get("coverType") == "poster":
                             image_url = img.get("remoteUrl", "")
                             break
+                        
                     if not image_url and event.get("images"):
                         image_url = event.get("images", [{}])[0].get("remoteUrl", "")
-                    
+
                     cal_event = CalendarEvent(
                         title=event.get("title", "Unknown"),
                         media_type=MediaType.MOVIE,
@@ -259,26 +275,27 @@ class SyncService:
                         image_alt=f"{event.get('title')} poster",
                         status=CalendarStatus.MONITORED
                     )
+
                     self.db.add(cal_event)
                     calendar_count += 1
-            
+
             self.db.commit()
-            
+
             duration_ms = int((time.time() - start_time) * 1000)
             self.update_sync_metadata(
-                ServiceType.RADARR, 
+                ServiceType.RADARR,
                 SyncStatus.SUCCESS,
                 added_count + calendar_count,
                 duration_ms
             )
-            
+
             print(f"✅ Radarr: {added_count} films, {calendar_count} événements")
             return {
                 "success": True,
                 "movies_added": added_count,
                 "calendar_events": calendar_count
             }
-            
+
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)
             self.update_sync_metadata(
@@ -292,7 +309,8 @@ class SyncService:
             return {"success": False, "error": str(e)}
         finally:
             await connector.close()
-    
+
+
     async def sync_sonarr(self) -> Dict[str, Any]:
         """Synchroniser les données Sonarr"""
         print("📺 Synchronisation Sonarr...")
@@ -300,7 +318,7 @@ class SyncService:
         
         service = self.get_active_service(ServiceType.SONARR)
         if not service:
-            print("⚠️  Service Sonarr non configuré")
+            print("⚠️ Service Sonarr non configuré")
             return {"success": False, "message": "Service non configuré"}
         
         connector = SonarrConnector(base_url=service.url, api_key=service.api_key, port=service.port)
@@ -309,7 +327,12 @@ class SyncService:
             # Récupérer les séries récentes
             recent_series = await connector.get_recent_additions(days=30)
             
+            # Récupérer la map seriesId -> torrent_hash
+            series_hash_map = await connector.get_series_history_map()
+            print(f"📥 {len(series_hash_map)} hash de torrents récupérés depuis Sonarr")
+            
             added_count = 0
+            
             for series in recent_series[:20]:
                 existing = self.db.query(LibraryItem).filter(
                     LibraryItem.title == series.get("title"),
@@ -334,8 +357,13 @@ class SyncService:
                         if img.get("coverType") == "poster":
                             image_url = img.get("remoteUrl", "")
                             break
+                        
                     if not image_url and series.get("images"):
                         image_url = series.get("images", [{}])[0].get("remoteUrl", "")
+                    
+                    # Récupérer le torrent_hash depuis la map
+                    series_id = series.get("id")
+                    torrent_hash = series_hash_map.get(series_id) if series_id else None
                     
                     item = LibraryItem(
                         title=series.get("title", "Unknown"),
@@ -347,15 +375,20 @@ class SyncService:
                         rating=str(series.get("ratings", {}).get("value", "")),
                         description=series.get("overview", ""),
                         added_date=time_ago,
-                        size=f"{size_gb} GB"
+                        size=f"{size_gb} GB",
+                        torrent_hash=torrent_hash  # ← NOUVEAU
                     )
+                    
                     self.db.add(item)
                     added_count += 1
+                    
+                    if torrent_hash:
+                        print(f"  ✅ {series.get('title')} - hash: {torrent_hash[:8]}...")
             
             # Récupérer le calendrier
             calendar = await connector.get_calendar(days_ahead=30)
-            
             calendar_count = 0
+            
             for event in calendar[:20]:
                 if not event.get("airDate"):
                     continue
@@ -386,6 +419,7 @@ class SyncService:
                         if img.get("coverType") == "poster":
                             image_url = img.get("remoteUrl", "")
                             break
+                        
                     if not image_url and series_data.get("images"):
                         image_url = series_data.get("images", [{}])[0].get("remoteUrl", "")
                     
@@ -398,6 +432,7 @@ class SyncService:
                         image_alt=f"{series_title} poster",
                         status=CalendarStatus.MONITORED
                     )
+                    
                     self.db.add(cal_event)
                     calendar_count += 1
             
@@ -431,6 +466,7 @@ class SyncService:
             return {"success": False, "error": str(e)}
         finally:
             await connector.close()
+
     
     async def sync_jellyfin(self) -> Dict[str, Any]:
         """Synchroniser les données Jellyfin"""
