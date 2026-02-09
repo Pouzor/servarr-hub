@@ -17,7 +17,7 @@ class QBittorrentConnector(BaseConnector):
         Initialise le connecteur qBittorrent
         
         Args:
-            base_url: URL de base de qBittorrent (ex: http://192.168.0.22)
+            base_url: URL de base de qBittorrent (ex: http://192.168.1.58)
             username: Nom d'utilisateur
             password: Mot de passe
             port: Port (optionnel, ex: 8090)
@@ -33,12 +33,20 @@ class QBittorrentConnector(BaseConnector):
         self.username = username
         self.password = password
         self.session: Optional[aiohttp.ClientSession] = None
-        self.cookies: Optional[Dict[str, str]] = None
+        self._authenticated = False
     
     async def _ensure_session(self):
         """Crée une session HTTP si elle n'existe pas"""
         if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
+            # Créer une session avec gestion automatique des cookies
+            jar = aiohttp.CookieJar(unsafe=True)  # unsafe=True pour accepter les cookies de toutes les IPs
+            self.session = aiohttp.ClientSession(cookie_jar=jar)
+            self._authenticated = False
+    
+    async def _ensure_authenticated(self):
+        """S'assure que la session est authentifiée"""
+        if not self._authenticated:
+            await self.login()
     
     async def login(self) -> bool:
         """
@@ -52,24 +60,26 @@ class QBittorrentConnector(BaseConnector):
             
             login_url = f"{self.base_url}/api/v2/auth/login"
             
-            data = {
-                'username': self.username,
-                'password': self.password
-            }
+            data = aiohttp.FormData()
+            data.add_field('username', self.username)
+            data.add_field('password', self.password)
+            
+            logger.info(f"🔐 Tentative de connexion à {login_url}")
             
             async with self.session.post(login_url, data=data) as response:
-                if response.status == 200:
-                    text = await response.text()
-                    if text == "Ok.":
-                        # Sauvegarder les cookies de session
-                        self.cookies = {cookie.key: cookie.value for cookie in self.session.cookie_jar}
-                        logger.info("✅ Authentification qBittorrent réussie")
-                        return True
-                    else:
-                        logger.error(f"❌ Authentification échouée : {text}")
-                        return False
+                text = await response.text()
+                logger.info(f"📥 Réponse login : status={response.status}, body={text}")
+                
+                if response.status == 200 and text.strip() == "Ok.":
+                    # Vérifier qu'on a bien reçu un cookie SID
+                    cookies = self.session.cookie_jar.filter_cookies(self.base_url)
+                    logger.info(f"🍪 Cookies reçus : {cookies}")
+                    
+                    self._authenticated = True
+                    logger.info("✅ Authentification qBittorrent réussie")
+                    return True
                 else:
-                    logger.error(f"❌ Erreur HTTP {response.status}")
+                    logger.error(f"❌ Authentification échouée : status={response.status}, body={text}")
                     return False
                     
         except Exception as e:
@@ -87,18 +97,17 @@ class QBittorrentConnector(BaseConnector):
             Dictionnaire avec les infos du torrent ou None
         """
         try:
-            # S'assurer d'être authentifié
-            if not self.cookies:
-                if not await self.login():
-                    return None
-            
-            await self._ensure_session()
+            await self._ensure_authenticated()
             
             # Récupérer les infos du torrent
             url = f"{self.base_url}/api/v2/torrents/info"
             params = {'hashes': torrent_hash}
             
+            logger.info(f"🔍 Récupération infos torrent : {url}?hashes={torrent_hash}")
+            
             async with self.session.get(url, params=params) as response:
+                logger.info(f"📥 Réponse get_torrent_info : status={response.status}")
+                
                 if response.status == 200:
                     torrents = await response.json()
                     
@@ -120,6 +129,11 @@ class QBittorrentConnector(BaseConnector):
                     else:
                         logger.warning(f"⚠️  Torrent {torrent_hash} non trouvé")
                         return None
+                elif response.status == 403:
+                    logger.error("❌ 403 Forbidden - Session expirée ?")
+                    # Réessayer avec une nouvelle authentification
+                    self._authenticated = False
+                    return None
                 else:
                     logger.error(f"❌ Erreur HTTP {response.status}")
                     return None
@@ -163,21 +177,26 @@ class QBittorrentConnector(BaseConnector):
             Tuple (succès, message)
         """
         try:
+            await self._ensure_session()
+            
             # Tenter l'authentification
-            if await self.login():
-                # Récupérer la version de qBittorrent
-                await self._ensure_session()
-                
-                url = f"{self.base_url}/api/v2/app/version"
-                
-                async with self.session.get(url) as response:
-                    if response.status == 200:
-                        version = await response.text()
-                        return True, f"Connecté à qBittorrent v{version}"
-                    else:
-                        return False, f"Erreur HTTP {response.status}"
-            else:
+            if not await self.login():
                 return False, "Échec de l'authentification. Vérifiez username/password."
+            
+            # Récupérer la version de qBittorrent
+            url = f"{self.base_url}/api/v2/app/version"
+            
+            logger.info(f"🔍 Test connexion : {url}")
+            
+            async with self.session.get(url) as response:
+                logger.info(f"📥 Réponse version : status={response.status}")
+                
+                if response.status == 200:
+                    version = await response.text()
+                    return True, f"Connecté à qBittorrent v{version}"
+                else:
+                    body = await response.text()
+                    return False, f"Erreur HTTP {response.status} : {body}"
                 
         except Exception as e:
             return False, f"Erreur de connexion : {str(e)}"
