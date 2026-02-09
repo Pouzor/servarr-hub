@@ -3,11 +3,12 @@ Routes pour gérer les torrents (qBittorrent)
 """
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from app.db import get_db
 from app.models.models import ServiceConfiguration
 from app.services.connector_factory import create_connector
+from app.services.torrent_enrichment_service import TorrentEnrichmentService
 from app.core.security import verify_api_key
 
 router = APIRouter(prefix="/api/torrents", tags=["torrents"])
@@ -54,3 +55,42 @@ async def get_torrent_info(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur lors de la récupération du torrent : {str(e)}")
+
+@router.post("/enrich")
+async def enrich_library_items(
+    limit: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Enrichit les library_items avec les données qBittorrent
+    
+    Args:
+        limit: Nombre maximum d'items à traiter (optionnel)
+        
+    Returns:
+        Statistiques de l'enrichissement
+    """
+    service = TorrentEnrichmentService(db)
+    stats = await service.enrich_all_items(limit=limit)
+    return stats
+
+
+@router.post("/enrich/recent")
+async def enrich_recent_items(
+    days: int = 7,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_api_key)
+) -> Dict[str, Any]:
+    """
+    Enrichit les items récents avec les données qBittorrent
+    
+    Args:
+        days: Nombre de jours en arrière (défaut: 7)
+        
+    Returns:
+        Statistiques de l'enrichissement
+    """
+    service = TorrentEnrichmentService(db)
+    stats = await service.enrich_recent_items(days=days)
+    return stats
