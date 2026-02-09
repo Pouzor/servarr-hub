@@ -6,9 +6,12 @@ from app.core.config import settings
 # Créer le moteur SQLAlchemy
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,  # Vérifier la connexion avant utilisation
-    pool_recycle=3600,   # Recycler les connexions après 1h
-    echo=False  # Afficher les requêtes SQL en mode debug
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,
+    connect_args={"charset": "utf8mb4"}  # ⬅️ Force le rechargement des métadonnées
 )
 
 # Session factory

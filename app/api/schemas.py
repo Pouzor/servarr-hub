@@ -14,10 +14,10 @@ from app.models.enums import (
 class ServiceConfigurationBase(BaseModel):
     service_name: ServiceType
     url: str
-    api_key: Optional[str] = None  # ⬅️ MODIFIÉ : Optionnel
+    api_key: Optional[str] = None
     port: Optional[int] = None
-    username: Optional[str] = None  # ⬅️ NOUVEAU
-    password: Optional[str] = None  # ⬅️ NOUVEAU
+    username: Optional[str] = None
+    password: Optional[str] = None
     is_active: bool = True
     
     @field_validator('api_key', 'username', 'password')
