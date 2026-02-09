@@ -2,10 +2,11 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from contextlib import asynccontextmanager
+
 from app.core.config import settings
 from app.core.security import verify_api_key
 from app.db import check_db_connection, init_db
-from app.api.routes import services, dashboard, jellyseerr, sync, analytics
+from app.api.routes import services, dashboard, jellyseerr, sync, analytics, torrents
 from app.schedulers.scheduler import app_scheduler
 from app.schedulers.analytics_scheduler import analytics_scheduler
 
@@ -57,6 +58,7 @@ app.include_router(dashboard.router, prefix="/api", dependencies=[Depends(verify
 app.include_router(jellyseerr.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(sync.router, prefix="/api", dependencies=[Depends(verify_api_key)])
 app.include_router(analytics.router, prefix="/api")
+app.include_router(torrents.router, dependencies=[Depends(verify_api_key)])
 
 @app.get("/")
 async def root():
@@ -67,7 +69,7 @@ async def root():
         "status": "running",
         "docs": "/docs",
         "scheduler": "active" if app_scheduler.is_running else "inactive",
-        "analytics_scheduler": "active" if analytics_scheduler.running else "inactive"  # NOUVEAU
+        "analytics_scheduler": "active" if analytics_scheduler.running else "inactive"
     }
 
 @app.get("/health")
@@ -78,5 +80,5 @@ async def health_check():
         "status": "healthy" if db_status else "unhealthy",
         "database": "connected" if db_status else "disconnected",
         "scheduler": "running" if app_scheduler.is_running else "stopped",
-        "analytics_scheduler": "running" if analytics_scheduler.running else "stopped"  # NOUVEAU
+        "analytics_scheduler": "running" if analytics_scheduler.running else "stopped"
     }
