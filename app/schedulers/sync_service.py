@@ -178,6 +178,7 @@ class SyncService:
 
             # Ajouter à la DB (éviter les doublons)
             added_count = 0
+            updated_count = 0
 
             for movie in recent_movies[:20]:  # Limiter à 20 pour ne pas surcharger
                 # Vérifier si existe déjà (par titre + année)
@@ -187,7 +188,18 @@ class SyncService:
                     LibraryItem.media_type == MediaType.MOVIE
                 ).first()
 
-                if not existing:
+                # Récupérer le torrent_hash depuis la map
+                movie_id = movie.get("id")
+                torrent_hash = movie_hash_map.get(movie_id) if movie_id else None
+
+                if existing:
+                    # Mettre à jour le hash si on en a un et qu'il n'existe pas encore
+                    if torrent_hash and not existing.torrent_hash:
+                        existing.torrent_hash = torrent_hash
+                        existing.updated_at = datetime.now(timezone.utc)
+                        updated_count += 1
+                        print(f"  🔄 Mise à jour hash pour: {movie.get('title')} - {torrent_hash[:8]}...")
+                else:
                     # Calculer la taille
                     size_bytes = movie.get("sizeOnDisk", 0)
                     size_gb = round(size_bytes / (1024**3), 1)
@@ -210,10 +222,6 @@ class SyncService:
                     if not image_url and movie.get("images"):
                         image_url = movie.get("images", [{}])[0].get("remoteUrl", "")
 
-                    # Récupérer le torrent_hash depuis la map
-                    movie_id = movie.get("id")
-                    torrent_hash = movie_hash_map.get(movie_id) if movie_id else None
-
                     item = LibraryItem(
                         title=movie.get("title", "Unknown"),
                         year=movie.get("year", 0),
@@ -225,7 +233,7 @@ class SyncService:
                         description=movie.get("overview", ""),
                         added_date=time_ago,
                         size=f"{size_gb} GB",
-                        torrent_hash=torrent_hash  # ← NOUVEAU
+                        torrent_hash=torrent_hash
                     )
 
                     self.db.add(item)
@@ -289,7 +297,7 @@ class SyncService:
                 duration_ms
             )
 
-            print(f"✅ Radarr: {added_count} films, {calendar_count} événements")
+            print(f"✅ Radarr: {added_count} films ajoutés, {updated_count} mis à jour, {calendar_count} événements")
             return {
                 "success": True,
                 "movies_added": added_count,
@@ -330,27 +338,39 @@ class SyncService:
             # Récupérer la map seriesId -> torrent_hash
             series_hash_map = await connector.get_series_history_map()
             print(f"📥 {len(series_hash_map)} hash de torrents récupérés depuis Sonarr")
-            
+
             added_count = 0
-            
+            updated_count = 0
+
             for series in recent_series[:20]:
                 existing = self.db.query(LibraryItem).filter(
                     LibraryItem.title == series.get("title"),
                     LibraryItem.year == series.get("year"),
                     LibraryItem.media_type == MediaType.TV
                 ).first()
-                
-                if not existing:
+
+                # Récupérer le torrent_hash depuis la map
+                series_id = series.get("id")
+                torrent_hash = series_hash_map.get(series_id) if series_id else None
+
+                if existing:
+                    # Mettre à jour le hash si on en a un et qu'il n'existe pas encore
+                    if torrent_hash and not existing.torrent_hash:
+                        existing.torrent_hash = torrent_hash
+                        existing.updated_at = datetime.now(timezone.utc)
+                        updated_count += 1
+                        print(f"  🔄 Mise à jour hash pour: {series.get('title')} - {torrent_hash[:8]}...")
+                else:
                     size_bytes = series.get("statistics", {}).get("sizeOnDisk", 0)
                     size_gb = round(size_bytes / (1024**3), 1)
-                    
+
                     added_date = series.get("added", "")
                     if added_date:
                         added_dt = datetime.fromisoformat(added_date.replace("Z", "+00:00"))
                         time_ago = self._format_time_ago(added_dt)
                     else:
                         time_ago = "Unknown"
-                    
+
                     # Récupérer l'image
                     image_url = ""
                     for img in series.get("images", []):
@@ -360,11 +380,7 @@ class SyncService:
                         
                     if not image_url and series.get("images"):
                         image_url = series.get("images", [{}])[0].get("remoteUrl", "")
-                    
-                    # Récupérer le torrent_hash depuis la map
-                    series_id = series.get("id")
-                    torrent_hash = series_hash_map.get(series_id) if series_id else None
-                    
+
                     item = LibraryItem(
                         title=series.get("title", "Unknown"),
                         year=series.get("year", 0),
@@ -376,15 +392,15 @@ class SyncService:
                         description=series.get("overview", ""),
                         added_date=time_ago,
                         size=f"{size_gb} GB",
-                        torrent_hash=torrent_hash  # ← NOUVEAU
+                        torrent_hash=torrent_hash
                     )
-                    
+
                     self.db.add(item)
                     added_count += 1
-                    
+
                     if torrent_hash:
-                        print(f"  ✅ {series.get('title')} - hash: {torrent_hash[:8]}...")
-            
+                        print(f"✅ Sonarr: {added_count} séries ajoutées, {updated_count} mises à jour, {calendar_count} événements")
+
             # Récupérer le calendrier
             calendar = await connector.get_calendar(days_ahead=30)
             calendar_count = 0
