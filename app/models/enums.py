@@ -67,3 +67,10 @@ class SessionStatus(str, enum.Enum):
     PAUSED = "paused"
     STOPPED = "stopped"
     BUFFERING = "buffering"
+
+
+class ItemSortBy(str, enum.Enum):
+    ADDED_DATE = "added_date"
+    TITLE = "title"
+    SIZE = "size"
+    RATIO = "ratio"

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from typing import List
+from sqlalchemy import func
+from typing import List, Optional
 from app.db import get_db
 from app.api.schemas import (
     DashboardResponse,
@@ -15,6 +16,7 @@ from app.models import (
     CalendarEvent,
     JellyseerrRequest
 )
+from app.models.enums import ItemSortBy
 from datetime import datetime, timedelta
 
 
@@ -78,11 +80,27 @@ async def get_statistics(db: Session = Depends(get_db)):
 @router.get("/recent-items", response_model=List[LibraryItemResponse])
 async def get_recent_items(
     limit: int = Query(default=20, ge=1, le=100),
+    sort_by: ItemSortBy = Query(default=ItemSortBy.ADDED_DATE),
+    sort_order: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db)
 ):
     """Récupérer les items récemment ajoutés"""
+    sort_mapping = {
+        ItemSortBy.ADDED_DATE: LibraryItem.created_at,
+        ItemSortBy.TITLE: LibraryItem.title,
+        ItemSortBy.SIZE: LibraryItem.size,
+        ItemSortBy.RATIO: func.json_extract(LibraryItem.torrent_info, '$.ratio'),
+    }
+
+    sort_column = sort_mapping[sort_by]
+
+    if sort_order == "asc":
+        sort_clause = sort_column.asc()
+    else:
+        sort_clause = sort_column.desc()
+
     items = db.query(LibraryItem)\
-        .order_by(LibraryItem.created_at.desc())\
+        .order_by(sort_clause)\
         .limit(limit)\
         .all()
     return items
