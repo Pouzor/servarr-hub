@@ -192,6 +192,8 @@ class SyncService:
                 movie_id = movie.get("id")
                 torrent_hash = movie_hash_map.get(movie_id) if movie_id else None
 
+                nb_media = 1 if movie.get("hasFile") else 0
+
                 if existing:
                     # Mettre à jour le hash si on en a un et qu'il n'existe pas encore
                     if torrent_hash and not existing.torrent_hash:
@@ -199,6 +201,8 @@ class SyncService:
                         existing.updated_at = datetime.now(timezone.utc)
                         updated_count += 1
                         print(f"  🔄 Mise à jour hash pour: {movie.get('title')} - {torrent_hash[:8]}...")
+                    # Toujours mettre à jour nb_media
+                    existing.nb_media = nb_media
                 else:
                     # Calculer la taille
                     size_bytes = movie.get("sizeOnDisk", 0)
@@ -233,7 +237,8 @@ class SyncService:
                         description=movie.get("overview", ""),
                         added_date=time_ago,
                         size=f"{size_gb} GB",
-                        torrent_hash=torrent_hash
+                        torrent_hash=torrent_hash,
+                        nb_media=nb_media
                     )
 
                     self.db.add(item)
@@ -353,6 +358,8 @@ class SyncService:
                 series_id = series.get("id")
                 torrent_hash = series_hash_map.get(series_id) if series_id else None
 
+                nb_media = series.get("statistics", {}).get("episodeFileCount", 0)
+
                 if existing:
                     # Mettre à jour le hash si on en a un et qu'il n'existe pas encore
                     if torrent_hash and not existing.torrent_hash:
@@ -360,6 +367,8 @@ class SyncService:
                         existing.updated_at = datetime.now(timezone.utc)
                         updated_count += 1
                         print(f"  🔄 Mise à jour hash pour: {series.get('title')} - {torrent_hash[:8]}...")
+                    # Toujours mettre à jour nb_media
+                    existing.nb_media = nb_media
                 else:
                     size_bytes = series.get("statistics", {}).get("sizeOnDisk", 0)
                     size_gb = round(size_bytes / (1024**3), 1)
@@ -392,7 +401,8 @@ class SyncService:
                         description=series.get("overview", ""),
                         added_date=time_ago,
                         size=f"{size_gb} GB",
-                        torrent_hash=torrent_hash
+                        torrent_hash=torrent_hash,
+                        nb_media=nb_media
                     )
 
                     self.db.add(item)

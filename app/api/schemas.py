@@ -107,6 +107,7 @@ class LibraryItemResponse(BaseModel):
     added_date: str
     size: str
     torrent_info: Optional[Dict[str, Any]] = None  # ⬅️ NOUVEAU
+    nb_media: int = 0
     created_at: datetime
     
     class Config:

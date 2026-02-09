@@ -80,6 +80,7 @@ class LibraryItem(Base):
     size = Column(Text, nullable=False)
     torrent_hash = Column(String(255), nullable=True, index=True)
     torrent_info = Column(JSON, nullable=True)
+    nb_media = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
