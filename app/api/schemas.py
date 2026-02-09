@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Dict, Any, List
 from datetime import datetime, date
 from app.models.enums import (
@@ -14,10 +14,10 @@ from app.models.enums import (
 class ServiceConfigurationBase(BaseModel):
     service_name: ServiceType
     url: str
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None  # ⬅️ MODIFIÉ : Optionnel
     port: Optional[int] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
+    username: Optional[str] = None  # ⬅️ NOUVEAU
+    password: Optional[str] = None  # ⬅️ NOUVEAU
     is_active: bool = True
     
     @field_validator('api_key', 'username', 'password')
@@ -31,31 +31,32 @@ class ServiceConfigurationBase(BaseModel):
 class ServiceConfigurationCreate(ServiceConfigurationBase):
     """Schéma pour créer un service"""
     
-    @model_validator(mode='after')
-    def validate_service_credentials(self):
+    @field_validator('service_name')
+    @classmethod
+    def validate_service_credentials(cls, v, info):
         """Valide les credentials selon le type de service"""
-        service_name = self.service_name
+        data = info.data
+        service_name = v
         
         # Services qui utilisent API key
         if service_name in [ServiceType.RADARR, ServiceType.SONARR, ServiceType.JELLYFIN, ServiceType.JELLYSEERR]:
-            if not self.api_key:
+            if not data.get('api_key'):
                 raise ValueError(f"{service_name.value} nécessite une api_key")
         
         # Services qui utilisent username/password
         elif service_name == ServiceType.QBITTORRENT:
-            if not self.username or not self.password:
-                raise ValueError(f"qBittorrent nécessite username et password (username={self.username}, password={'***' if self.password else None})")
+            if not data.get('username') or not data.get('password'):
+                raise ValueError("qBittorrent nécessite username et password")
         
-        return self
-
+        return v
 
 
 class ServiceConfigurationUpdate(BaseModel):
     url: Optional[str] = None
     api_key: Optional[str] = None
     port: Optional[int] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
+    username: Optional[str] = None  # ⬅️ NOUVEAU
+    password: Optional[str] = None  # ⬅️ NOUVEAU
     is_active: Optional[bool] = None
 
 
