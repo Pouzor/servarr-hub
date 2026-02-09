@@ -146,7 +146,7 @@ async def test_service_connection(
     connector = ConnectorClass(
         base_url=service.url, 
         api_key=service.api_key,
-        port=service.port  # ⬅️ AJOUT DU PORT ICI
+        port=service.port
     )
     
     try:

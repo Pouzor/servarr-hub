@@ -18,7 +18,18 @@ class ServiceConfiguration(Base):
     __tablename__ = "service_configurations"
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    service_name = Column(SQLEnum(ServiceType), unique=True, nullable=False, index=True)
+    service_name = Column(
+        SQLEnum(
+            ServiceType,
+            name='servicetype',
+            create_constraint=True,
+            native_enum=True,
+            validate_strings=False
+        ),
+        unique=True,
+        nullable=False,
+        index=True
+    )
     url = Column(Text, nullable=False)
     api_key = Column(Text, nullable=True)
     port = Column(Integer)
