@@ -1,28 +1,40 @@
-from sqlalchemy import create_engine, text
+"""
+Configuration de la base de données
+"""
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
+import logging
 
-# Créer le moteur SQLAlchemy
+# Désactiver les logs SQLAlchemy
+logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
+logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+
+# Créer l'engine SQLAlchemy
 engine = create_engine(
     settings.DATABASE_URL,
-    pool_pre_ping=True,  # Vérifier la connexion avant utilisation
-    pool_recycle=3600,   # Recycler les connexions après 1h
-    echo=False  # Afficher les requêtes SQL en mode debug
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600
 )
 
-# Session factory
+# ⬇️ NOUVEAU : Event listener pour forcer le rechargement des enums
+@event.listens_for(engine, "connect")
+def receive_connect(dbapi_conn, connection_record):
+    """Force le rechargement des métadonnées à chaque connexion"""
+    # Invalider le cache des types
+    connection_record.info.pop('sqlalchemy_cache', None)
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base pour les modèles
 Base = declarative_base()
 
 
 def get_db():
-    """
-    Dependency pour obtenir une session DB
-    À utiliser dans les endpoints FastAPI
-    """
+    """Dépendance pour obtenir une session DB"""
     db = SessionLocal()
     try:
         yield db
@@ -30,17 +42,17 @@ def get_db():
         db.close()
 
 
-def init_db():
-    """Créer toutes les tables"""
-    Base.metadata.create_all(bind=engine)
-
-
 def check_db_connection():
     """Vérifier la connexion à la base de données"""
     try:
         with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
-        return True
+            return True
     except Exception as e:
-        print(f"Erreur de connexion DB: {e}")
+        print(f"Erreur de connexion à la base de données : {e}")
         return False
+
+
+def init_db():
+    """Initialiser la base de données (créer les tables)"""
+    from app.models import models
+    Base.metadata.create_all(bind=engine)
