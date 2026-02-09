@@ -3,8 +3,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy.orm import Session
 from app.db import SessionLocal
 from app.schedulers.sync_service import SyncService
+from app.services.torrent_enrichment_service import TorrentEnrichmentService
 import asyncio
-
 
 class AppScheduler:
     """Gestionnaire de tâches planifiées"""
@@ -17,8 +17,16 @@ class AppScheduler:
         """Tâche de synchronisation à exécuter"""
         db = SessionLocal()
         try:
+            # 1. Synchronisation des données
             sync_service = SyncService(db)
             await sync_service.sync_all()
+            
+            # 2. Enrichissement des torrents
+            print("\n🔄 Enrichissement des torrents...")
+            torrent_service = TorrentEnrichmentService(db)
+            stats = await torrent_service.enrich_all_items(limit=50)  # Limiter à 50 par run
+            print(f"✅ Torrents enrichis : {stats.get('success')}/{stats.get('total')}")
+            
         except Exception as e:
             print(f"❌ Erreur lors de la synchro planifiée: {e}")
         finally:
@@ -32,7 +40,7 @@ class AppScheduler:
             interval_minutes: Intervalle entre chaque synchro (défaut: 15 min)
         """
         if self.is_running:
-            print("⚠️  Scheduler déjà démarré")
+            print("⚠️ Scheduler déjà démarré")
             return
         
         # Ajouter le job de synchronisation
@@ -47,7 +55,6 @@ class AppScheduler:
         # Démarrer le scheduler
         self.scheduler.start()
         self.is_running = True
-        
         print(f"⏰ Scheduler démarré (intervalle: {interval_minutes} minutes)")
     
     def stop(self):
@@ -57,8 +64,7 @@ class AppScheduler:
         
         self.scheduler.shutdown()
         self.is_running = False
-        print("⏸️  Scheduler arrêté")
-
+        print("⏸️ Scheduler arrêté")
 
 # Instance globale du scheduler
 app_scheduler = AppScheduler()
