@@ -31,32 +31,31 @@ class ServiceConfigurationBase(BaseModel):
 class ServiceConfigurationCreate(ServiceConfigurationBase):
     """Schéma pour créer un service"""
     
-    @field_validator('service_name')
-    @classmethod
-    def validate_service_credentials(cls, v, info):
+    @model_validator(mode='after')
+    def validate_service_credentials(self):
         """Valide les credentials selon le type de service"""
-        data = info.data
-        service_name = v
+        service_name = self.service_name
         
         # Services qui utilisent API key
         if service_name in [ServiceType.RADARR, ServiceType.SONARR, ServiceType.JELLYFIN, ServiceType.JELLYSEERR]:
-            if not data.get('api_key'):
+            if not self.api_key:
                 raise ValueError(f"{service_name.value} nécessite une api_key")
         
         # Services qui utilisent username/password
         elif service_name == ServiceType.QBITTORRENT:
-            if not data.get('username') or not data.get('password'):
-                raise ValueError("qBittorrent nécessite username et password")
+            if not self.username or not self.password:
+                raise ValueError(f"qBittorrent nécessite username et password (username={self.username}, password={'***' if self.password else None})")
         
-        return v
+        return self
+
 
 
 class ServiceConfigurationUpdate(BaseModel):
     url: Optional[str] = None
     api_key: Optional[str] = None
     port: Optional[int] = None
-    username: Optional[str] = None  # ⬅️ NOUVEAU
-    password: Optional[str] = None  # ⬅️ NOUVEAU
+    username: Optional[str] = None
+    password: Optional[str] = None
     is_active: Optional[bool] = None
 
 
