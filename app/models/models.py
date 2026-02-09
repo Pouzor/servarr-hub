@@ -19,9 +19,9 @@ class ServiceConfiguration(Base):
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
     service_name = Column(
-        String(50),  # ⬅️ On utilise String au lieu d'Enum
-        unique=True, 
-        nullable=False, 
+        String(50),
+        unique=True,
+        nullable=False,
         index=True
     )
     url = Column(Text, nullable=False)
@@ -78,6 +78,7 @@ class LibraryItem(Base):
     description = Column(Text)
     added_date = Column(Text, nullable=False)
     size = Column(Text, nullable=False)
+    torrent_hash = Column(String(255), nullable=True, index=True)
     torrent_info = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -114,7 +115,6 @@ class JellyseerrRequest(Base):
     description = Column(Text)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-
 
 # Table 7: Playback Sessions
 class PlaybackSession(Base):
@@ -175,7 +175,6 @@ class PlaybackSession(Base):
         Index('idx_session_device_start', 'device_type', 'start_time'),
     )
 
-
 # Table 8: Media Statistics (Agrégation des statistiques par média)
 class MediaStatistic(Base):
     """Statistiques agrégées par média"""
@@ -211,7 +210,6 @@ class MediaStatistic(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
 # Table 9: Device Statistics (Agrégation par type d'appareil)
 class DeviceStatistic(Base):
     """Statistiques agrégées par type d'appareil sur une période"""
@@ -239,7 +237,6 @@ class DeviceStatistic(Base):
     __table_args__ = (
         Index('idx_device_period', 'device_type', 'period_start', 'period_end', unique=True),
     )
-
 
 # Table 10: Daily Analytics (Agrégation quotidienne)
 class DailyAnalytic(Base):
@@ -269,7 +266,6 @@ class DailyAnalytic(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-
 # Table 11: Server Metrics (Métriques serveur en temps réel)
 class ServerMetric(Base):
     """Métriques du serveur (CPU, RAM, etc.) - Snapshots réguliers"""
@@ -297,5 +293,4 @@ class ServerMetric(Base):
     
     # Timestamp
     recorded_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
-    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
