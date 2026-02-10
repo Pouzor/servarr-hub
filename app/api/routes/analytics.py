@@ -3,7 +3,9 @@ Routes API pour les analytics et webhooks
 """
 
 import logging
+import traceback
 from datetime import date, timedelta
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import and_, desc, func
@@ -45,6 +47,11 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
     - Resume : Reprise de lecture
     """
     try:
+        # Valider la taille du payload (max 1 Mo)
+        content_length = request.headers.get("content-length")
+        if content_length and int(content_length) > 1_048_576:
+            raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload trop volumineux")
+
         # Récupérer le payload
         payload = await request.json()
 
@@ -121,15 +128,6 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
             device_name = session.get("DeviceName", "Unknown")
             client_name = session.get("Client", "Unknown")
 
-            # Mapper vers DeviceType
-            device_type = "WEB_BROWSER"  # Par défaut  # noqa: F841
-            if "Chrome" in device_name or "Firefox" in device_name or "Safari" in device_name:
-                device_type = "WEB_BROWSER"
-            elif "Android" in device_name or "iOS" in device_name:
-                device_type = "MOBILE"
-            elif "TV" in device_name or "Roku" in device_name or "Fire" in device_name:
-                device_type = "TV"  # noqa: F841
-
             # URL du poster : Utiliser l'URL publique de Jellyfin
             poster_url = None
             if item.get("ImageTags", {}).get("Primary"):
@@ -204,13 +202,15 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
             session = AnalyticsService.pause_session(db, media_id, user_id)
             if session:
                 logger.info(f"⏸️  Session mise en pause : {session.id}")
-            return {"status": "success", "session_id": session.id if session else None, "event": event_type}
+                return {"status": "success", "session_id": session.id, "event": event_type}
+            return {"status": "no_active_session", "event": event_type}
 
         elif event_type == "playback.unpause":
             session = AnalyticsService.resume_session(db, media_id, user_id)
             if session:
                 logger.info(f"▶️  Session reprise : {session.id}")
-            return {"status": "success", "session_id": session.id if session else None, "event": event_type}
+                return {"status": "success", "session_id": session.id, "event": event_type}
+            return {"status": "no_active_session", "event": event_type}
 
         else:
             logger.warning(f"⚠️  Événement non supporté : {event_type}")
@@ -220,11 +220,9 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
         raise
     except Exception as e:
         logger.error(f"❌ Erreur lors du traitement du webhook : {e}")
-        import traceback
-
         logger.error(traceback.format_exc())
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erreur serveur : {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
         ) from e
 
 
@@ -274,8 +272,10 @@ async def get_usage_analytics(
 @router.get("/media", response_model=list[MediaPlaybackAnalyticsItem])
 async def get_media_playback_analytics(
     limit: int = Query(50, ge=1, le=100, description="Nombre de résultats"),
-    sort_by: str = Query("plays", description="Tri par : plays, duration, last_played"),
-    order: str = Query("desc", description="Ordre : asc ou desc"),
+    sort_by: Literal["plays", "duration", "last_played"] = Query(
+        "plays", description="Tri par : plays, duration, last_played"
+    ),
+    order: Literal["asc", "desc"] = Query("desc", description="Ordre : asc ou desc"),
     db: Session = Depends(get_db),
     api_key: str = Depends(verify_api_key),
 ):
