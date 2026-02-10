@@ -325,6 +325,7 @@ async def get_media_playback_analytics(
                     quality=quality_str,
                     status=status_str,
                     poster_url=stat.poster_url,
+                    last_played_at=stat.last_played_at,
                 )
             )
 

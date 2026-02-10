@@ -181,8 +181,15 @@ class AnalyticsService:
             session.status = SessionStatus.STOPPED
             session.is_active = False
 
-            if watched_seconds is not None:
+            if watched_seconds and watched_seconds > 0:
                 session.watched_seconds = watched_seconds
+            else:
+                # Fallback : calculer la durée à partir du temps écoulé
+                elapsed = int((session.end_time - session.start_time).total_seconds())
+                # Plafonner au maximum à la durée du média si connue
+                if session.duration_seconds and elapsed > session.duration_seconds:
+                    elapsed = session.duration_seconds
+                session.watched_seconds = elapsed
 
             db.commit()
             db.refresh(session)

@@ -364,6 +364,7 @@ class MediaPlaybackAnalyticsItem(BaseModel):
     quality: str
     status: str  # "Direct" ou "Transcoded"
     poster_url: str | None = None
+    last_played_at: datetime | None = None
 
 
 class ActiveSessionItem(BaseModel):
