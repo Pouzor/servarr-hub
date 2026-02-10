@@ -3,7 +3,7 @@ Service de gestion des analytics et des sessions de lecture
 """
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import desc, func
@@ -127,7 +127,7 @@ class AnalyticsService:
                 transcoding_speed=session_data.get("transcoding_speed"),
                 video_codec_source=session_data.get("video_codec_source"),
                 video_codec_target=session_data.get("video_codec_target"),
-                start_time=datetime.utcnow(),
+                start_time=datetime.now(UTC),
                 duration_seconds=session_data.get("duration_seconds"),
                 watched_seconds=0,
                 status=SessionStatus.ACTIVE,
@@ -177,7 +177,7 @@ class AnalyticsService:
                 return None
 
             # Mettre à jour la session
-            session.end_time = datetime.utcnow()
+            session.end_time = datetime.now(UTC)
             session.status = SessionStatus.STOPPED
             session.is_active = False
 
@@ -290,7 +290,7 @@ class AnalyticsService:
             # Mettre à jour les compteurs
             media_stat.total_plays += 1
             media_stat.total_watched_seconds += session.watched_seconds
-            media_stat.last_played_at = session.end_time or datetime.utcnow()
+            media_stat.last_played_at = session.end_time or datetime.now(UTC)
 
             if session.playback_method == PlaybackMethod.DIRECT_PLAY:
                 media_stat.direct_play_count += 1
@@ -391,9 +391,7 @@ class AnalyticsService:
             timeout_hours: Nombre d'heures après lesquelles une session est considérée orpheline
         """
         try:
-            from datetime import timedelta
-
-            cutoff_time = datetime.utcnow() - timedelta(hours=timeout_hours)
+            cutoff_time = datetime.now(UTC) - timedelta(hours=timeout_hours)
 
             # Trouver les sessions actives trop anciennes
             orphan_sessions = (
@@ -406,16 +404,10 @@ class AnalyticsService:
             for session in orphan_sessions:
                 session.is_active = False
                 session.status = SessionStatus.STOPPED
-                session.end_time = datetime.utcnow()
+                session.end_time = datetime.now(UTC)
 
-                # Si watched_seconds est 0, estimer basé sur la durée
-                if session.watched_seconds == 0 and session.duration_seconds:
-                    # Estimer qu'ils ont regardé la moitié
-                    session.watched_seconds = session.duration_seconds // 2
-
-                # Mettre à jour les statistiques
-                AnalyticsService.update_media_statistics(db, session)
-                AnalyticsService.update_daily_analytics(db, session)
+                # Ne pas estimer watched_seconds pour les sessions orphelines
+                # pour éviter de corrompre les données analytics
 
                 count += 1
 
@@ -442,7 +434,7 @@ class AnalyticsService:
         """
         try:
             if not target_date:
-                target_date = (datetime.utcnow() - timedelta(days=1)).date()
+                target_date = (datetime.now(UTC) - timedelta(days=1)).date()
 
             # Pour chaque type d'appareil
             for device_type in DeviceType:

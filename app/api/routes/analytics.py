@@ -2,6 +2,7 @@
 Routes API pour les analytics et webhooks
 """
 
+import json
 import logging
 import traceback
 from datetime import date, timedelta
@@ -48,19 +49,19 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
     """
     try:
         # Valider la taille du payload (max 1 Mo)
-        content_length = request.headers.get("content-length")
-        if content_length and int(content_length) > 1_048_576:
+        body = await request.body()
+        if len(body) > 1_048_576:
             raise HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload trop volumineux")
 
         # Récupérer le payload
-        payload = await request.json()
+        payload = json.loads(body)
 
         # Extraire les données principales
         event_type_raw = payload.get("Event")
         item = payload.get("Item", {})
         user = payload.get("User", {})
-        session = payload.get("Session", {})
-        play_state = session.get("PlayState", {})
+        session_info = payload.get("Session", {})
+        play_state = session_info.get("PlayState", {})
 
         # Mapping des événements
         event_mapping = {
@@ -125,8 +126,8 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
             duration_seconds = run_time_ticks // 10000000 if run_time_ticks else None
 
             # Déterminer le type d'appareil
-            device_name = session.get("DeviceName", "Unknown")
-            client_name = session.get("Client", "Unknown")
+            device_name = session_info.get("DeviceName", "Unknown")
+            client_name = session_info.get("Client", "Unknown")
 
             # URL du poster : Utiliser l'URL publique de Jellyfin
             poster_url = None
@@ -180,36 +181,38 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
             if library_item:
                 session_data["library_item_id"] = library_item.id
 
-            session = AnalyticsService.start_session(db, session_data)
-            logger.info(f"✅ Session créée : {session.id} - {session.media_title}")
-            return {"status": "success", "session_id": session.id, "event": event_type}
+            playback_session = AnalyticsService.start_session(db, session_data)
+            logger.info(f"✅ Session créée : {playback_session.id} - {playback_session.media_title}")
+            return {"status": "success", "session_id": playback_session.id, "event": event_type}
 
         elif event_type == "playback.stop":
             # Position de lecture en secondes
             playback_position_ticks = play_state.get("PositionTicks", 0)
             watched_seconds = playback_position_ticks // 10000000 if playback_position_ticks else 0
 
-            session = AnalyticsService.stop_session(db, media_id, user_id, watched_seconds)
+            playback_session = AnalyticsService.stop_session(db, media_id, user_id, watched_seconds)
 
-            if session:
-                logger.info(f"✅ Session arrêtée : {session.id} - {session.media_title} ({watched_seconds}s)")
-                return {"status": "success", "session_id": session.id, "event": event_type}
+            if playback_session:
+                logger.info(
+                    f"✅ Session arrêtée : {playback_session.id} - {playback_session.media_title} ({watched_seconds}s)"
+                )
+                return {"status": "success", "session_id": playback_session.id, "event": event_type}
             else:
                 logger.warning(f"⚠️  Aucune session active trouvée pour media_id={media_id}, user_id={user_id}")
                 return {"status": "no_active_session", "event": event_type}
 
         elif event_type == "playback.pause":
-            session = AnalyticsService.pause_session(db, media_id, user_id)
-            if session:
-                logger.info(f"⏸️  Session mise en pause : {session.id}")
-                return {"status": "success", "session_id": session.id, "event": event_type}
+            playback_session = AnalyticsService.pause_session(db, media_id, user_id)
+            if playback_session:
+                logger.info(f"⏸️  Session mise en pause : {playback_session.id}")
+                return {"status": "success", "session_id": playback_session.id, "event": event_type}
             return {"status": "no_active_session", "event": event_type}
 
         elif event_type == "playback.unpause":
-            session = AnalyticsService.resume_session(db, media_id, user_id)
-            if session:
-                logger.info(f"▶️  Session reprise : {session.id}")
-                return {"status": "success", "session_id": session.id, "event": event_type}
+            playback_session = AnalyticsService.resume_session(db, media_id, user_id)
+            if playback_session:
+                logger.info(f"▶️  Session reprise : {playback_session.id}")
+                return {"status": "success", "session_id": playback_session.id, "event": event_type}
             return {"status": "no_active_session", "event": event_type}
 
         else:
@@ -266,7 +269,9 @@ async def get_usage_analytics(
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la récupération des usage analytics : {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
+        ) from e
 
 
 @router.get("/media", response_model=list[MediaPlaybackAnalyticsItem])
@@ -333,7 +338,9 @@ async def get_media_playback_analytics(
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la récupération des media analytics : {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
+        ) from e
 
 
 @router.get("/sessions/active", response_model=list[ActiveSessionItem])
@@ -361,7 +368,9 @@ async def get_active_sessions(db: Session = Depends(get_db), api_key: str = Depe
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la récupération des sessions actives : {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
+        ) from e
 
 
 @router.get("/devices", response_model=list[DeviceBreakdownItem])
@@ -411,7 +420,9 @@ async def get_device_breakdown(
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la récupération du device breakdown : {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
+        ) from e
 
 
 @router.get("/server-metrics", response_model=ServerPerformanceResponse | None)
@@ -463,4 +474,6 @@ async def get_server_metrics(db: Session = Depends(get_db), api_key: str = Depen
 
     except Exception as e:
         logger.error(f"❌ Erreur lors de la récupération des server metrics : {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e)) from e
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erreur interne du serveur"
+        ) from e
