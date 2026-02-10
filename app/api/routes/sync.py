@@ -1,11 +1,10 @@
-from fastapi import APIRouter, Depends, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from sqlalchemy.orm import Session
-from typing import Dict, Any
-from app.db import get_db
-from app.schedulers.sync_service import SyncService
-from app.api.schemas import SyncMetadataResponse
-from app.models import SyncMetadata
 
+from app.api.schemas import SyncMetadataResponse
+from app.db import get_db
+from app.models import SyncMetadata
+from app.schedulers.sync_service import SyncService
 
 router = APIRouter(prefix="/sync", tags=["Synchronization"])
 
@@ -13,30 +12,23 @@ router = APIRouter(prefix="/sync", tags=["Synchronization"])
 @router.post("/trigger")
 async def trigger_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Déclencher manuellement une synchronisation complète"""
-    
+
     async def run_sync():
         sync_service = SyncService(db)
         await sync_service.sync_all()
-    
+
     background_tasks.add_task(run_sync)
-    
-    return {
-        "message": "Synchronisation lancée en arrière-plan",
-        "status": "started"
-    }
+
+    return {"message": "Synchronisation lancée en arrière-plan", "status": "started"}
 
 
 @router.post("/trigger/{service_name}")
-async def trigger_service_sync(
-    service_name: str,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db)
-):
+async def trigger_service_sync(service_name: str, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     """Déclencher la synchronisation d'un service spécifique"""
-    
+
     async def run_service_sync():
         sync_service = SyncService(db)
-        
+
         if service_name == "radarr":
             await sync_service.sync_radarr()
         elif service_name == "sonarr":
@@ -45,13 +37,10 @@ async def trigger_service_sync(
             await sync_service.sync_jellyfin()
         elif service_name == "jellyseerr":
             await sync_service.sync_jellyseerr()
-    
+
     background_tasks.add_task(run_service_sync)
-    
-    return {
-        "message": f"Synchronisation {service_name} lancée",
-        "status": "started"
-    }
+
+    return {"message": f"Synchronisation {service_name} lancée", "status": "started"}
 
 
 @router.get("/status", response_model=list[SyncMetadataResponse])

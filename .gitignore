@@ -25,9 +25,18 @@ venv/
 env/
 ENV/
 
-# Environment variables
+# Environment variables - NEVER commit
 .env
-.env.local
+.env.*
+!.env.example
+
+# Secrets
+*.pem
+*.key
+*.p12
+credentials.json
+secrets.json
+service-account*.json
 
 # IDE
 .vscode/
@@ -55,3 +64,6 @@ Thumbs.db
 
 # Claude Code
 CLAUDE.md
+
+# Project specs session (local state)
+_project_specs/session/current-state.md

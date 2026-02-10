@@ -39,6 +39,7 @@ class CalendarStatus(str, enum.Enum):
     DOWNLOADING = "downloading"
     AVAILABLE = "available"
 
+
 class DeviceType(str, enum.Enum):
     WEB_BROWSER = "web_browser"
     MOBILE_APP = "mobile_app"
@@ -48,10 +49,12 @@ class DeviceType(str, enum.Enum):
     STREAMING_DEVICE = "streaming_device"
     OTHER = "other"
 
+
 class PlaybackMethod(str, enum.Enum):
     DIRECT_PLAY = "direct_play"
     DIRECT_STREAM = "direct_stream"
     TRANSCODED = "transcoded"
+
 
 class VideoQuality(str, enum.Enum):
     FOUR_K_HDR = "4k_hdr"
@@ -61,6 +64,7 @@ class VideoQuality(str, enum.Enum):
     SD = "480p"
     LOW = "360p"
     UNKNOWN = "unknown"
+
 
 class SessionStatus(str, enum.Enum):
     ACTIVE = "active"

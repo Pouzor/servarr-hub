@@ -1,32 +1,32 @@
 """
 Configuration de la base de données
 """
+
+import logging
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+
 from app.core.config import settings
-import logging
 
 # Désactiver les logs SQLAlchemy
-logging.getLogger('sqlalchemy.engine').setLevel(logging.WARNING)
-logging.getLogger('sqlalchemy.pool').setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
+logging.getLogger("sqlalchemy.pool").setLevel(logging.WARNING)
 
 # Créer l'engine SQLAlchemy
 engine = create_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600
+    settings.DATABASE_URL, echo=False, pool_pre_ping=True, pool_size=10, max_overflow=20, pool_recycle=3600
 )
+
 
 # ⬇️ NOUVEAU : Event listener pour forcer le rechargement des enums
 @event.listens_for(engine, "connect")
 def receive_connect(dbapi_conn, connection_record):
     """Force le rechargement des métadonnées à chaque connexion"""
     # Invalider le cache des types
-    connection_record.info.pop('sqlalchemy_cache', None)
+    connection_record.info.pop("sqlalchemy_cache", None)
+
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -45,7 +45,7 @@ def get_db():
 def check_db_connection():
     """Vérifier la connexion à la base de données"""
     try:
-        with engine.connect() as connection:
+        with engine.connect():
             return True
     except Exception as e:
         print(f"Erreur de connexion à la base de données : {e}")
@@ -54,5 +54,4 @@ def check_db_connection():
 
 def init_db():
     """Initialiser la base de données (créer les tables)"""
-    from app.models import models
     Base.metadata.create_all(bind=engine)

@@ -1,10 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from app.db import get_db
-from app.api.schemas import JellyseerrRequestAction
-from app.models import ServiceConfiguration, ServiceType, JellyseerrRequest
-from app.services import JellyseerrConnector
 
+from app.db import get_db
+from app.models import JellyseerrRequest, ServiceConfiguration, ServiceType
+from app.services import JellyseerrConnector
 
 router = APIRouter(prefix="/jellyseerr", tags=["Jellyseerr"])
 
@@ -13,48 +12,36 @@ router = APIRouter(prefix="/jellyseerr", tags=["Jellyseerr"])
 async def approve_request(request_id: str, db: Session = Depends(get_db)):
     """Approuver une requête Jellyseerr"""
     # Récupérer la config Jellyseerr
-    service = db.query(ServiceConfiguration).filter(
-        ServiceConfiguration.service_name == ServiceType.JELLYSEERR
-    ).first()
-    
+    service = db.query(ServiceConfiguration).filter(ServiceConfiguration.service_name == ServiceType.JELLYSEERR).first()
+
     if not service or not service.is_active:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service Jellyseerr non configuré ou inactif"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service Jellyseerr non configuré ou inactif"
         )
-    
+
     # Vérifier que la requête existe en DB
-    request = db.query(JellyseerrRequest).filter(
-        JellyseerrRequest.id == request_id
-    ).first()
-    
+    request = db.query(JellyseerrRequest).filter(JellyseerrRequest.id == request_id).first()
+
     if not request:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Requête non trouvée"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requête non trouvée")
+
     # Appeler l'API Jellyseerr
     connector = JellyseerrConnector(base_url=service.url, api_key=service.api_key)
-    
+
     try:
         # Note: L'ID dans Jellyseerr peut être différent de notre UUID
         # Il faudrait stocker l'ID externe, pour l'instant on simule
-        result = await connector.approve_request(int(request_id))
-        
+        await connector.approve_request(int(request_id))
+
         # Supprimer la requête de notre DB (elle est maintenant approved)
         db.delete(request)
         db.commit()
-        
-        return {
-            "success": True,
-            "message": "Requête approuvée avec succès"
-        }
+
+        return {"success": True, "message": "Requête approuvée avec succès"}
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors de l'approbation: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erreur lors de l'approbation: {str(e)}"
+        ) from e
     finally:
         await connector.close()
 
@@ -62,42 +49,30 @@ async def approve_request(request_id: str, db: Session = Depends(get_db)):
 @router.post("/requests/{request_id}/decline")
 async def decline_request(request_id: str, db: Session = Depends(get_db)):
     """Refuser une requête Jellyseerr"""
-    service = db.query(ServiceConfiguration).filter(
-        ServiceConfiguration.service_name == ServiceType.JELLYSEERR
-    ).first()
-    
+    service = db.query(ServiceConfiguration).filter(ServiceConfiguration.service_name == ServiceType.JELLYSEERR).first()
+
     if not service or not service.is_active:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Service Jellyseerr non configuré ou inactif"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Service Jellyseerr non configuré ou inactif"
         )
-    
-    request = db.query(JellyseerrRequest).filter(
-        JellyseerrRequest.id == request_id
-    ).first()
-    
+
+    request = db.query(JellyseerrRequest).filter(JellyseerrRequest.id == request_id).first()
+
     if not request:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Requête non trouvée"
-        )
-    
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requête non trouvée")
+
     connector = JellyseerrConnector(base_url=service.url, api_key=service.api_key)
-    
+
     try:
-        result = await connector.decline_request(int(request_id))
-        
+        await connector.decline_request(int(request_id))
+
         db.delete(request)
         db.commit()
-        
-        return {
-            "success": True,
-            "message": "Requête refusée avec succès"
-        }
+
+        return {"success": True, "message": "Requête refusée avec succès"}
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Erreur lors du refus: {str(e)}"
-        )
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Erreur lors du refus: {str(e)}"
+        ) from e
     finally:
         await connector.close()
