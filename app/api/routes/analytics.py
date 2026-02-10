@@ -2,8 +2,10 @@
 Routes API pour les analytics et webhooks
 """
 
+import hmac
 import json
 import logging
+import re
 import traceback
 from datetime import date, timedelta
 from typing import Literal
@@ -30,6 +32,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
+# Pattern Jellyfin ID (hex 32 chars)
+_JELLYFIN_ID_PATTERN = re.compile(r"^[a-fA-F0-9]{1,64}$")
+
+
+def _truncate(value: str | None, max_length: int = 255) -> str | None:
+    """Tronque une chaîne à une longueur maximale"""
+    if value is None:
+        return None
+    return value[:max_length]
+
 
 # ============================================
 # WEBHOOK ENDPOINT (PUBLIC)
@@ -48,6 +60,13 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
     - Resume : Reprise de lecture
     """
     try:
+        # Vérifier le secret webhook si configuré
+        webhook_secret = settings.WEBHOOK_SECRET
+        if webhook_secret:
+            request_secret = request.headers.get("X-Webhook-Secret", "")
+            if not hmac.compare_digest(request_secret, webhook_secret):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Secret webhook invalide")
+
         # Valider la taille du payload (max 1 Mo)
         body = await request.body()
         if len(body) > 1_048_576:
@@ -79,12 +98,15 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
 
         logger.info(f"📥 Webhook reçu : {event_type} - {item.get('Name', 'Unknown')}")
 
-        # Extraction des IDs
+        # Extraction et validation des IDs
         media_id = item.get("Id")
         user_id = user.get("Id")
 
         if not media_id or not user_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Item.Id et User.Id sont requis")
+
+        if not _JELLYFIN_ID_PATTERN.match(str(media_id)) or not _JELLYFIN_ID_PATTERN.match(str(user_id)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Format d'ID invalide")
 
         # Traitement selon le type d'événement
         if event_type == "playback.start":
@@ -104,9 +126,13 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
             video_stream = next((s for s in media_streams if s.get("Type") == "Video"), {})
             video_height = video_stream.get("Height", 0)
 
-            # Mapper la qualité
-            quality_map = {2160: "FOUR_K_HDR", 1080: "FULL_HD", 720: "HD", 480: "SD"}
-            video_quality = quality_map.get(video_height, "UNKNOWN")
+            # Mapper la qualité (vérifier HDR pour 2160p)
+            video_range = video_stream.get("VideoRange", "")
+            if video_height >= 2160:
+                video_quality = "FOUR_K_HDR" if video_range and video_range.upper() == "HDR" else "FOUR_K"
+            else:
+                quality_map = {1080: "FULL_HD", 720: "HD", 480: "SD"}
+                video_quality = quality_map.get(video_height, "UNKNOWN")
 
             # Codec vidéo source
             video_codec_source = video_stream.get("Codec", "unknown")
@@ -131,29 +157,28 @@ async def receive_playback_webhook(request: Request, db: Session = Depends(get_d
 
             # URL du poster : Utiliser l'URL publique de Jellyfin
             poster_url = None
-            if item.get("ImageTags", {}).get("Primary"):
-                # Configuration de l'URL publique Jellyfin
-                jellyfin_url = getattr(settings, "JELLYFIN_PUBLIC_URL", "https://changeme.com")
+            jellyfin_url = getattr(settings, "JELLYFIN_PUBLIC_URL", None)
+            if item.get("ImageTags", {}).get("Primary") and jellyfin_url:
                 poster_url = f"{jellyfin_url}/Items/{media_id}/Images/Primary"
 
             session_data = {
                 "media_id": media_id,
-                "media_title": item.get("Name", "Unknown"),
+                "media_title": _truncate(item.get("Name", "Unknown")),
                 "media_type": media_type,
                 "media_year": item.get("ProductionYear"),
-                "episode_info": episode_info,
-                "poster_url": poster_url,
+                "episode_info": _truncate(episode_info, 20),
+                "poster_url": _truncate(poster_url, 500),
                 "user_id": user_id,
-                "user_name": user.get("Name", "Unknown"),
-                "device_name": device_name,
-                "client_name": client_name,
+                "user_name": _truncate(user.get("Name", "Unknown")),
+                "device_name": _truncate(device_name),
+                "client_name": _truncate(client_name),
                 "video_quality": video_quality,
                 "is_transcoding": is_transcoding,
                 "is_direct_playing": is_direct_playing,
                 "transcoding_progress": 0,
                 "transcoding_speed": None,
-                "video_codec_source": video_codec_source,
-                "video_codec_target": video_codec_target,
+                "video_codec_source": _truncate(video_codec_source, 50),
+                "video_codec_target": _truncate(video_codec_target, 50),
                 "duration_seconds": duration_seconds,
             }
 

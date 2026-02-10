@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     # Security
     SECRET_KEY: str
     API_KEY: str
+    WEBHOOK_SECRET: str = ""
 
     # App Info
     APP_NAME: str = "Servarr Hub"

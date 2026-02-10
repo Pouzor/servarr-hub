@@ -35,8 +35,12 @@ class AnalyticsService:
         ):
             return DeviceType.MOBILE_APP
 
+        # Streaming devices (avant Smart TV pour éviter les doublons)
+        if any(stream in device_lower for stream in ["chromecast", "roku", "fire stick", "firestick"]):
+            return DeviceType.STREAMING_DEVICE
+
         # Smart TVs
-        if any(tv in device_lower for tv in ["tv", "roku", "firestick", "fire tv", "apple tv", "chromecast"]):
+        if any(tv in device_lower for tv in ["tv", "fire tv", "apple tv"]):
             return DeviceType.SMART_TV
 
         # Desktop apps
@@ -46,10 +50,6 @@ class AnalyticsService:
         # Game consoles
         if any(console in device_lower for console in ["xbox", "playstation", "ps4", "ps5"]):
             return DeviceType.GAME_CONSOLE
-
-        # Streaming devices
-        if any(stream in device_lower for stream in ["chromecast", "roku", "fire stick"]):
-            return DeviceType.STREAMING_DEVICE
 
         return DeviceType.OTHER
 
