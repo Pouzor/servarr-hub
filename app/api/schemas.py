@@ -9,6 +9,7 @@ from app.models.enums import (
     MediaType,
     PlaybackMethod,
     RequestPriority,
+    RequestStatus,
     ServiceType,
     SessionStatus,
     StatType,
@@ -144,13 +145,17 @@ class CalendarEventResponse(BaseModel):
 # Jellyseerr Request Schemas
 class JellyseerrRequestResponse(BaseModel):
     id: str
+    jellyseerr_id: int
     title: str
     media_type: MediaType
     year: int
     image_url: str
     image_alt: str
+    status: RequestStatus
     priority: RequestPriority
     requested_by: str
+    requested_by_avatar: str | None = None
+    requested_by_user_id: int | None = None
     requested_date: str
     quality: str
     description: str | None = None

@@ -73,6 +73,12 @@ class SessionStatus(str, enum.Enum):
     BUFFERING = "buffering"
 
 
+class RequestStatus(int, enum.Enum):
+    PENDING = 1
+    APPROVED = 2
+    DECLINED = 3
+
+
 class ItemSortBy(str, enum.Enum):
     ADDED_DATE = "added_date"
     TITLE = "title"

@@ -19,22 +19,39 @@ class JellyseerrConnector(BaseConnector):
         except Exception as e:
             return False, f"Erreur de connexion: {str(e)}"
 
-    async def get_requests(self, limit: int = 50, status: str = "pending") -> list[dict[str, Any]]:
+    async def get_requests(self, limit: int = 100, status: str = "all") -> list[dict[str, Any]]:
         """
-        Récupérer les demandes de médias
+        Récupérer les demandes de médias avec pagination
 
         Args:
-            limit: Nombre maximum de requêtes
-            status: Statut des requêtes (pending, approved, declined)
+            limit: Nombre maximum de requêtes par page
+            status: Statut des requêtes (pending, approved, declined, all)
 
         Returns:
-            Liste des demandes
+            Liste de toutes les demandes
         """
         try:
-            params = {"take": limit, "skip": 0, "filter": status}
+            all_results = []
+            skip = 0
 
-            response = await self._get("/api/v1/request", params=params)
-            return response.get("results", [])
+            while True:
+                params = {"take": limit, "skip": skip, "filter": status}
+                response = await self._get("/api/v1/request", params=params)
+
+                results = response.get("results", [])
+                if not results:
+                    break
+
+                all_results.extend(results)
+
+                # Arrêter si on a tout récupéré
+                total = response.get("pageInfo", {}).get("results", 0)
+                if len(all_results) >= total:
+                    break
+
+                skip += limit
+
+            return all_results
         except Exception as e:
             print(f"❌ Erreur récupération requêtes Jellyseerr: {e}")
             return []

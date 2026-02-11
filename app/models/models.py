@@ -11,6 +11,7 @@ from app.models.enums import (
     MediaType,
     PlaybackMethod,
     RequestPriority,
+    RequestStatus,
     ServiceType,
     SessionStatus,
     StatType,
@@ -115,13 +116,17 @@ class JellyseerrRequest(Base):
     __tablename__ = "jellyseerr_requests"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
+    jellyseerr_id = Column(Integer, unique=True, index=True, nullable=False)
     title = Column(Text, nullable=False)
     media_type = Column(SQLEnum(MediaType), nullable=False)
     year = Column(Integer, nullable=False)
     image_url = Column(Text, nullable=False)
     image_alt = Column(Text, nullable=False)
+    status = Column(SQLEnum(RequestStatus), nullable=False, default=RequestStatus.PENDING, index=True)
     priority = Column(SQLEnum(RequestPriority), nullable=False, default=RequestPriority.MEDIUM, index=True)
     requested_by = Column(Text, nullable=False)
+    requested_by_avatar = Column(Text, nullable=True)
+    requested_by_user_id = Column(Integer, nullable=True)
     requested_date = Column(Text, nullable=False)
     quality = Column(Text, nullable=False)
     description = Column(Text)

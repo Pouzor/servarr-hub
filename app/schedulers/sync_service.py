@@ -12,6 +12,7 @@ from app.models import (
     LibraryItem,
     MediaType,
     RequestPriority,
+    RequestStatus,
     ServiceConfiguration,
     ServiceType,
     StatType,
@@ -580,7 +581,7 @@ class SyncService:
             await connector.close()
 
     async def sync_jellyseerr(self) -> dict[str, Any]:
-        """Synchroniser les données Jellyseerr"""
+        """Synchroniser les données Jellyseerr (upsert par jellyseerr_id)"""
         print("📝 Synchronisation Jellyseerr...")
         start_time = time.time()
 
@@ -597,22 +598,30 @@ class SyncService:
             if not success:
                 raise Exception(f"Test de connexion échoué: {message}")
 
-            # Récupérer les requêtes pendantes
-            requests = await connector.get_requests(limit=50, status="pending")
+            # Récupérer toutes les requêtes (tous statuts)
+            requests = await connector.get_requests(limit=100, status="all")
 
-            if not requests:
-                print("ℹ️  Aucune requête Jellyseerr en attente")
-                duration_ms = int((time.time() - start_time) * 1000)
-                self.update_sync_metadata(ServiceType.JELLYSEERR, SyncStatus.SUCCESS, 0, duration_ms)
-                return {"success": True, "requests_added": 0}
+            # Mapper les statuts Jellyseerr vers notre enum
+            status_map = {
+                1: RequestStatus.PENDING,
+                2: RequestStatus.APPROVED,
+                3: RequestStatus.DECLINED,
+            }
 
-            # Nettoyer les anciennes requêtes
-            self.db.query(JellyseerrRequest).delete()
+            # Construire un set des IDs Jellyseerr reçus depuis l'API
+            api_jellyseerr_ids = set()
 
-            # Ajouter les nouvelles
             added_count = 0
-            for req in requests[:20]:
+            updated_count = 0
+
+            for req in requests:
                 try:
+                    jellyseerr_id = req.get("id")
+                    if not jellyseerr_id:
+                        continue
+
+                    api_jellyseerr_ids.add(jellyseerr_id)
+
                     media = req.get("media", {})
                     requested_by = req.get("requestedBy", {})
 
@@ -633,33 +642,74 @@ class SyncService:
                         except (ValueError, TypeError, AttributeError):
                             pass
 
-                    request_item = JellyseerrRequest(
-                        title=media.get("title", "Unknown"),
-                        media_type=MediaType.MOVIE if req.get("type") == "movie" else MediaType.TV,
-                        year=year,
-                        image_url=f"https://image.tmdb.org/t/p/w500{media.get('posterPath', '')}"
-                        if media.get("posterPath")
-                        else "",
-                        image_alt=f"{media.get('title', 'Unknown')} poster",
-                        priority=RequestPriority.MEDIUM,
-                        requested_by=requested_by.get("displayName", "Unknown"),
-                        requested_date=requested_date,
-                        quality="4K" if req.get("is4k") else "1080p",
-                        description=media.get("overview", ""),
+                    req_status = status_map.get(req.get("status"), RequestStatus.PENDING)
+
+                    # Upsert : chercher par jellyseerr_id
+                    existing = (
+                        self.db.query(JellyseerrRequest)
+                        .filter(JellyseerrRequest.jellyseerr_id == jellyseerr_id)
+                        .first()
                     )
-                    self.db.add(request_item)
-                    added_count += 1
+
+                    if existing:
+                        # Mettre à jour les champs qui peuvent changer
+                        existing.status = req_status
+                        existing.requested_by = requested_by.get("displayName", existing.requested_by)
+                        existing.requested_by_avatar = requested_by.get("avatar")
+                        existing.requested_by_user_id = requested_by.get("id")
+                        existing.quality = "4K" if req.get("is4k") else "1080p"
+                        existing.requested_date = requested_date
+                        updated_count += 1
+                    else:
+                        request_item = JellyseerrRequest(
+                            jellyseerr_id=jellyseerr_id,
+                            title=media.get("title", "Unknown"),
+                            media_type=MediaType.MOVIE if req.get("type") == "movie" else MediaType.TV,
+                            year=year,
+                            image_url=f"https://image.tmdb.org/t/p/w500{media.get('posterPath', '')}"
+                            if media.get("posterPath")
+                            else "",
+                            image_alt=f"{media.get('title', 'Unknown')} poster",
+                            status=req_status,
+                            priority=RequestPriority.MEDIUM,
+                            requested_by=requested_by.get("displayName", "Unknown"),
+                            requested_by_avatar=requested_by.get("avatar"),
+                            requested_by_user_id=requested_by.get("id"),
+                            requested_date=requested_date,
+                            quality="4K" if req.get("is4k") else "1080p",
+                            description=media.get("overview", ""),
+                        )
+                        self.db.add(request_item)
+                        added_count += 1
                 except Exception as item_error:
                     print(f"⚠️  Erreur traitement requête Jellyseerr: {item_error}")
                     continue
 
+            # Supprimer les requêtes qui n'existent plus dans l'API
+            stale_deleted = 0
+            if api_jellyseerr_ids:
+                stale_deleted = (
+                    self.db.query(JellyseerrRequest)
+                    .filter(JellyseerrRequest.jellyseerr_id.notin_(api_jellyseerr_ids))
+                    .delete(synchronize_session="fetch")
+                )
+            else:
+                # Si l'API ne retourne rien, supprimer tout
+                stale_deleted = self.db.query(JellyseerrRequest).delete()
+
             self.db.commit()
 
             duration_ms = int((time.time() - start_time) * 1000)
-            self.update_sync_metadata(ServiceType.JELLYSEERR, SyncStatus.SUCCESS, added_count, duration_ms)
+            total_synced = added_count + updated_count
+            self.update_sync_metadata(ServiceType.JELLYSEERR, SyncStatus.SUCCESS, total_synced, duration_ms)
 
-            print(f"✅ Jellyseerr: {added_count} requêtes")
-            return {"success": True, "requests_added": added_count}
+            print(f"✅ Jellyseerr: {added_count} ajoutées, {updated_count} mises à jour, {stale_deleted} supprimées")
+            return {
+                "success": True,
+                "requests_added": added_count,
+                "requests_updated": updated_count,
+                "requests_deleted": stale_deleted,
+            }
 
         except Exception as e:
             duration_ms = int((time.time() - start_time) * 1000)

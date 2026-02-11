@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.models import JellyseerrRequest, ServiceConfiguration, ServiceType
+from app.models import JellyseerrRequest, RequestStatus, ServiceConfiguration, ServiceType
 from app.services import JellyseerrConnector
 
 router = APIRouter(prefix="/jellyseerr", tags=["Jellyseerr"])
@@ -25,16 +25,14 @@ async def approve_request(request_id: str, db: Session = Depends(get_db)):
     if not request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Requête non trouvée")
 
-    # Appeler l'API Jellyseerr
+    # Appeler l'API Jellyseerr avec l'ID externe
     connector = JellyseerrConnector(base_url=service.url, api_key=service.api_key)
 
     try:
-        # Note: L'ID dans Jellyseerr peut être différent de notre UUID
-        # Il faudrait stocker l'ID externe, pour l'instant on simule
-        await connector.approve_request(int(request_id))
+        await connector.approve_request(request.jellyseerr_id)
 
-        # Supprimer la requête de notre DB (elle est maintenant approved)
-        db.delete(request)
+        # Mettre à jour le statut en DB
+        request.status = RequestStatus.APPROVED
         db.commit()
 
         return {"success": True, "message": "Requête approuvée avec succès"}
@@ -64,9 +62,10 @@ async def decline_request(request_id: str, db: Session = Depends(get_db)):
     connector = JellyseerrConnector(base_url=service.url, api_key=service.api_key)
 
     try:
-        await connector.decline_request(int(request_id))
+        await connector.decline_request(request.jellyseerr_id)
 
-        db.delete(request)
+        # Mettre à jour le statut en DB
+        request.status = RequestStatus.DECLINED
         db.commit()
 
         return {"success": True, "message": "Requête refusée avec succès"}
