@@ -610,6 +610,8 @@ class SyncService:
 
             # Construire un set des IDs Jellyseerr reçus depuis l'API
             api_jellyseerr_ids = set()
+            # Cache des détails média pour éviter les appels dupliqués
+            media_details_cache: dict[tuple[int, str], dict[str, Any]] = {}
 
             added_count = 0
             updated_count = 0
@@ -624,14 +626,35 @@ class SyncService:
 
                     media = req.get("media", {})
                     requested_by = req.get("requestedBy", {})
+                    media_type_str = req.get("type", "movie")
+                    tmdb_id = media.get("tmdbId")
 
-                    # Extraction sécurisée de l'année
+                    # Récupérer les détails du média via TMDB ID (avec cache)
+                    media_details = {}
+                    if tmdb_id:
+                        cache_key = (tmdb_id, media_type_str)
+                        if cache_key not in media_details_cache:
+                            media_details_cache[cache_key] = await connector.get_media_details(tmdb_id, media_type_str)
+                        media_details = media_details_cache[cache_key]
+
+                    # Titre : depuis les détails TMDB
+                    title = media_details.get("title") or media_details.get("name") or "Unknown"
+
+                    # Année : depuis releaseDate (movie) ou firstAirDate (tv)
                     year = 0
-                    if media.get("releaseDate"):
+                    release_date = media_details.get("releaseDate") or media_details.get("firstAirDate") or ""
+                    if release_date:
                         try:
-                            year = int(media.get("releaseDate", "")[:4])
+                            year = int(release_date[:4])
                         except (ValueError, TypeError):
                             year = 0
+
+                    # Image : posterPath depuis les détails TMDB
+                    poster_path = media_details.get("posterPath", "")
+                    image_url = f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else ""
+
+                    # Description
+                    description = media_details.get("overview", "")
 
                     # Extraction sécurisée de la date de création
                     requested_date = "Unknown"
@@ -653,6 +676,11 @@ class SyncService:
 
                     if existing:
                         # Mettre à jour les champs qui peuvent changer
+                        existing.title = title
+                        existing.year = year
+                        existing.image_url = image_url
+                        existing.image_alt = f"{title} poster"
+                        existing.description = description
                         existing.status = req_status
                         existing.requested_by = requested_by.get("displayName", existing.requested_by)
                         existing.requested_by_avatar = requested_by.get("avatar")
@@ -663,13 +691,11 @@ class SyncService:
                     else:
                         request_item = JellyseerrRequest(
                             jellyseerr_id=jellyseerr_id,
-                            title=media.get("title", "Unknown"),
-                            media_type=MediaType.MOVIE if req.get("type") == "movie" else MediaType.TV,
+                            title=title,
+                            media_type=MediaType.MOVIE if media_type_str == "movie" else MediaType.TV,
                             year=year,
-                            image_url=f"https://image.tmdb.org/t/p/w500{media.get('posterPath', '')}"
-                            if media.get("posterPath")
-                            else "",
-                            image_alt=f"{media.get('title', 'Unknown')} poster",
+                            image_url=image_url,
+                            image_alt=f"{title} poster",
                             status=req_status,
                             priority=RequestPriority.MEDIUM,
                             requested_by=requested_by.get("displayName", "Unknown"),
@@ -677,7 +703,7 @@ class SyncService:
                             requested_by_user_id=requested_by.get("id"),
                             requested_date=requested_date,
                             quality="4K" if req.get("is4k") else "1080p",
-                            description=media.get("overview", ""),
+                            description=description,
                         )
                         self.db.add(request_item)
                         added_count += 1

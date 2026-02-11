@@ -56,6 +56,24 @@ class JellyseerrConnector(BaseConnector):
             print(f"❌ Erreur récupération requêtes Jellyseerr: {e}")
             return []
 
+    async def get_media_details(self, tmdb_id: int, media_type: str) -> dict[str, Any]:
+        """
+        Récupérer les détails d'un média via son tmdbId
+
+        Args:
+            tmdb_id: ID TMDB du média
+            media_type: Type de média ("movie" ou "tv")
+
+        Returns:
+            Détails du média (title, posterPath, releaseDate, overview, etc.)
+        """
+        try:
+            endpoint = f"/api/v1/{'movie' if media_type == 'movie' else 'tv'}/{tmdb_id}"
+            return await self._get(endpoint)
+        except Exception as e:
+            print(f"⚠️  Erreur récupération détails média {tmdb_id}: {e}")
+            return {}
+
     async def approve_request(self, request_id: int) -> dict[str, Any]:
         """
         Approuver une demande
