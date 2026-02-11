@@ -256,7 +256,7 @@ class SyncService:
             # Récupérer le calendrier
             calendar = await connector.get_calendar(days_ahead=30)
 
-            # Ajouter au calendrier
+            # Ajouter/mettre à jour le calendrier
             calendar_count = 0
             for event in calendar[:20]:
                 release_date_str = event.get("physicalRelease") or event.get("digitalRelease")
@@ -268,34 +268,40 @@ class SyncService:
                 except (ValueError, TypeError):
                     continue
 
+                title = event.get("title", "Unknown")
+
+                # Récupérer l'image
+                image_url = ""
+                for img in event.get("images", []):
+                    if img.get("coverType") == "poster":
+                        image_url = img.get("remoteUrl", "")
+                        break
+                if not image_url and event.get("images"):
+                    image_url = event.get("images", [{}])[0].get("remoteUrl", "")
+
                 existing = (
                     self.db.query(CalendarEvent)
-                    .filter(CalendarEvent.title == event.get("title"), CalendarEvent.release_date == release_date)
+                    .filter(CalendarEvent.title == title, CalendarEvent.release_date == release_date)
                     .first()
                 )
 
-                if not existing:
-                    # Récupérer l'image
-                    image_url = ""
-                    for img in event.get("images", []):
-                        if img.get("coverType") == "poster":
-                            image_url = img.get("remoteUrl", "")
-                            break
-
-                    if not image_url and event.get("images"):
-                        image_url = event.get("images", [{}])[0].get("remoteUrl", "")
-
+                if existing:
+                    # Mettre à jour les champs potentiellement vides
+                    if image_url and not existing.image_url:
+                        existing.image_url = image_url
+                        existing.image_alt = f"{title} poster"
+                else:
                     cal_event = CalendarEvent(
-                        title=event.get("title", "Unknown"),
+                        title=title,
                         media_type=MediaType.MOVIE,
                         release_date=release_date,
                         image_url=image_url,
-                        image_alt=f"{event.get('title')} poster",
+                        image_alt=f"{title} poster",
                         status=CalendarStatus.MONITORED,
                     )
-
                     self.db.add(cal_event)
-                    calendar_count += 1
+
+                calendar_count += 1
 
             self.db.commit()
 
@@ -409,7 +415,7 @@ class SyncService:
                     if torrent_hash:
                         print(f"  ✅ {series.get('title')} - hash: {torrent_hash[:8]}...")
 
-            # Récupérer le calendrier
+            # Récupérer le calendrier (includeSeries=true dans le connector)
             calendar = await connector.get_calendar(days_ahead=30)
             calendar_count = 0
 
@@ -422,45 +428,66 @@ class SyncService:
                 except (ValueError, TypeError):
                     continue
 
-                # Titre avec info épisode
-                series_title = event.get("series", {}).get("title", "Unknown")
+                # Titre et image depuis l'objet series (inclus via includeSeries=true)
+                series_data = event.get("series", {})
+                series_title = series_data.get("title") or event.get("title", "Unknown")
                 season = event.get("seasonNumber", 0)
                 episode_num = event.get("episodeNumber", 0)
+                episode_str = f"Season {season}, Episode {episode_num}"
 
+                # Récupérer l'image depuis les images de la série
+                image_url = ""
+                for img in series_data.get("images", []):
+                    if img.get("coverType") == "poster":
+                        image_url = img.get("remoteUrl", "")
+                        break
+                if not image_url and series_data.get("images"):
+                    image_url = series_data.get("images", [{}])[0].get("remoteUrl", "")
+
+                # Chercher un enregistrement existant (par titre + date + épisode)
                 existing = (
                     self.db.query(CalendarEvent)
                     .filter(
-                        CalendarEvent.title == series_title,
                         CalendarEvent.release_date == air_date,
-                        CalendarEvent.episode == f"Season {season}, Episode {episode_num}",
+                        CalendarEvent.episode == episode_str,
+                        CalendarEvent.media_type == MediaType.TV,
                     )
                     .first()
                 )
 
+                # Aussi chercher par ancien titre "Unknown" pour corriger
                 if not existing:
-                    # Récupérer l'image
-                    image_url = ""
-                    series_data = event.get("series", {})
-                    for img in series_data.get("images", []):
-                        if img.get("coverType") == "poster":
-                            image_url = img.get("remoteUrl", "")
-                            break
+                    existing = (
+                        self.db.query(CalendarEvent)
+                        .filter(
+                            CalendarEvent.title == "Unknown",
+                            CalendarEvent.release_date == air_date,
+                            CalendarEvent.episode == episode_str,
+                            CalendarEvent.media_type == MediaType.TV,
+                        )
+                        .first()
+                    )
 
-                    if not image_url and series_data.get("images"):
-                        image_url = series_data.get("images", [{}])[0].get("remoteUrl", "")
-
+                if existing:
+                    # Mettre à jour les champs vides ou incorrects
+                    if existing.title == "Unknown" and series_title != "Unknown":
+                        existing.title = series_title
+                    if image_url and not existing.image_url:
+                        existing.image_url = image_url
+                    existing.image_alt = f"{series_title} poster"
+                else:
                     cal_event = CalendarEvent(
                         title=series_title,
                         media_type=MediaType.TV,
                         release_date=air_date,
-                        episode=f"Season {season}, Episode {episode_num}",
+                        episode=episode_str,
                         image_url=image_url,
                         image_alt=f"{series_title} poster",
                         status=CalendarStatus.MONITORED,
                     )
-
                     self.db.add(cal_event)
-                    calendar_count += 1
+
+                calendar_count += 1
 
             self.db.commit()
 

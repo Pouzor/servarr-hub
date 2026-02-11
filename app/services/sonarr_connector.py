@@ -48,7 +48,7 @@ class SonarrConnector(BaseConnector):
             start_date = datetime.now(UTC).date()
             end_date = start_date + timedelta(days=days_ahead)
 
-            params = {"start": start_date.isoformat(), "end": end_date.isoformat()}
+            params = {"start": start_date.isoformat(), "end": end_date.isoformat(), "includeSeries": "true"}
 
             calendar = await self._get("/api/v3/calendar", params=params)
             return calendar
