@@ -208,9 +208,6 @@ class SyncService:
                     if size_bytes > 0:
                         size_gb = round(size_bytes / (1024**3), 1)
                         existing.size = f"{size_gb} GB"
-                        print(f"  🔄 Mise à jour Size pour: {movie.get('title')} - {size_bytes}")
-                    else:
-                        print(f"  🔄 PAS DE MODIF Mise à jour Size pour: {movie.get('title')} - {size_bytes}")
                 else:
                     # Calculer la taille
                     size_bytes = movie.get("sizeOnDisk", 0)
