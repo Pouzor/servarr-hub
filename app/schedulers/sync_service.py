@@ -203,6 +203,11 @@ class SyncService:
                         print(f"  🔄 Mise à jour hash pour: {movie.get('title')} - {torrent_hash[:8]}...")
                     # Toujours mettre à jour nb_media
                     existing.nb_media = nb_media
+                    # Mettre à jour la taille si elle était à 0
+                    size_bytes = movie.get("sizeOnDisk", 0)
+                    if size_bytes > 0:
+                        size_gb = round(size_bytes / (1024**3), 1)
+                        existing.size = f"{size_gb} GB"
                 else:
                     # Calculer la taille
                     size_bytes = movie.get("sizeOnDisk", 0)
@@ -356,6 +361,11 @@ class SyncService:
                         print(f"  🔄 Mise à jour hash pour: {series.get('title')} - {torrent_hash[:8]}...")
                     # Toujours mettre à jour nb_media
                     existing.nb_media = nb_media
+                    # Mettre à jour la taille si elle était à 0
+                    size_bytes = series.get("statistics", {}).get("sizeOnDisk", 0)
+                    if size_bytes > 0:
+                        size_gb = round(size_bytes / (1024**3), 1)
+                        existing.size = f"{size_gb} GB"
                 else:
                     size_bytes = series.get("statistics", {}).get("sizeOnDisk", 0)
                     size_gb = round(size_bytes / (1024**3), 1)
